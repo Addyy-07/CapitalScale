@@ -145,6 +145,27 @@ export const deleteLoan = asyncHandler(async (req, res) => {
   return ApiResponse.ok(null, 'Loan application deleted successfully').send(res);
 });
 
+export const deleteDraft = asyncHandler(async (req, res) => {
+  await LoanService.deleteDraft(req.params.id, req.user);
+
+  recordAuditLog({
+    actor_id: req.user.id,
+    actor_ref_model: 'SMEUser',
+    actor_email: req.user.email,
+    action: 'loan.delete_draft',
+    method: 'DELETE',
+    resource_path: req.originalUrl,
+    resource_id: req.params.id,
+    resource_model: 'Loan',
+    status: 'success',
+    status_code: 200,
+    ip_address: req.ip,
+    user_agent: req.headers['user-agent'],
+  }).catch(() => {});
+
+  return ApiResponse.ok(null, 'Draft application deleted successfully').send(res);
+});
+
 
 export const createDraft = asyncHandler(async (req, res) => {
   const loan = await LoanService.createDraft(req.user.id, req.body);

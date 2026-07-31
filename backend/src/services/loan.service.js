@@ -69,6 +69,8 @@ const LoanService = {
           name: b.bank_name,
           branch: b.branch_name || 'Main Branch',
           ifsc: b.ifsc_code || 'N/A',
+          admin_name: b.admin_name || 'System Administrator',
+          email: b.email || 'support@capitalscale.com',
           // These fields may not exist in DB; provide sensible defaults
           rate: 'Contact Bank',
           limit: 'Contact Bank',
@@ -318,6 +320,25 @@ const LoanService = {
     if (userContext.role !== 'super_admin') throw ApiError.forbidden('Only super administrators can delete loan records');
     const result = await deleteLoan(id);
     if (!result) throw ApiError.notFound('Loan application not found');
+    return result;
+  },
+
+  async deleteDraft(loanId, userContext) {
+    if (userContext.role !== 'sme') throw ApiError.forbidden('Only SME applicants can delete their drafts');
+    const loan = await findLoanById(loanId);
+    if (!loan) throw ApiError.notFound('Loan draft not found');
+    const smeId = loan.sme_id?.id || loan.sme_id;
+    if (smeId !== userContext.id) throw ApiError.forbidden('Not authorized to delete this draft');
+    if (loan.status !== 'draft') throw ApiError.badRequest('Only applications in draft status can be deleted');
+    
+    if (loan.documents) {
+      for (const [key, doc] of Object.entries(loan.documents)) {
+        if (doc.public_id) await deleteFromCloudinary(doc.public_id).catch(() => {});
+        if (doc.ocr_job_id) await deleteChunksBySourceDocument(doc.ocr_job_id).catch(() => {});
+      }
+    }
+
+    const result = await deleteLoan(loanId);
     return result;
   },
 

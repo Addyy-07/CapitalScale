@@ -180,7 +180,7 @@ export const getRolePermissions = async (roleId) => {
 export const getRegisteredBanks = async () => {
   const { data, error } = await supabase
     .from('bank_admin_users')
-    .select('id, bank_name, branch_name, ifsc_code')
+    .select('id, bank_name, branch_name, ifsc_code, admin_name, email')
     .eq('is_deleted', false)
     .eq('is_active', true)
     .order('created_at', { ascending: true });
