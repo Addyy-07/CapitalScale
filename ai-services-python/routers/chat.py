@@ -221,7 +221,7 @@ async def chat_with_bank_policy(bank_id: str, body: ChatRequest) -> ChatResponse
             chunks=chunks,
             prompt_template=POLICY_CHAT_PROMPT,
             empty_message=f"No policy documents found for bank {bank_id}.",
-            source_formatter=lambda c: f"{c['document_name']} (Page {c.get('page_number') or 'N/A'})",
+            source_formatter=lambda c: f"Page {c.get('page_number') or 'N/A'}",
             extra={"policy_app_id": policy_app_id},
         )
     except HTTPException:
