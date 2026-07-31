@@ -167,6 +167,19 @@ export default function SMEDashboard() {
     }
   };
 
+  const handleDeleteDraft = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this draft?')) return;
+    try {
+      await loanApi.deleteDraft(id);
+      setApplications(prev => prev.filter(app => (app.id || app._id) !== id));
+      if (selectedUploadAppId === id) setSelectedUploadAppId('');
+      if (selectedAppId === id) setSelectedAppId('');
+    } catch (err) {
+      console.error('Failed to delete draft:', err);
+      alert('Failed to delete draft. Please try again.');
+    }
+  };
+
   
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -794,10 +807,7 @@ export default function SMEDashboard() {
                     <span className="text-slate-300 block">Authorized Phone</span>
                     <span className="text-slate-300">{user?.phone}</span>
                   </div>
-                  <div>
-                    <span className="text-slate-300 block">Corporate Address</span>
-                    <span className="text-slate-300">Plot 12, Sector 5, Bandra West, Mumbai, 400050</span>
-                  </div>
+
                 </CardContent>
               </Card>
 
@@ -1021,13 +1031,22 @@ export default function SMEDashboard() {
                           <TableCell>{getStatusBadge(app.status)}</TableCell>
                           <TableCell className="text-right pr-6 space-x-2">
                             {app.status === 'draft' ? (
-                              <button
-                                onClick={() => navigate('/loan/apply', { state: { draftId: app._id } })}
-                                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs rounded-lg transition-colors inline-flex items-center gap-1"
-                              >
-                                Resume Draft
-                                <ChevronRight className="w-3 h-3" />
-                              </button>
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  onClick={() => navigate('/loan/apply', { state: { draftId: app._id } })}
+                                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs rounded-lg transition-colors inline-flex items-center gap-1"
+                                >
+                                  Resume Draft
+                                  <ChevronRight className="w-3 h-3" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteDraft(app._id || app.id)}
+                                  className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 rounded-lg transition-colors"
+                                  title="Delete Draft"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
                             ) : (
                               <button
                                 onClick={() => handleTrackCase(app.appId)}
@@ -1254,8 +1273,12 @@ export default function SMEDashboard() {
                       </div>
                       <div className="border-t border-white/5 pt-4 space-y-2">
                         <span className="text-slate-300 block">Assigned Credit Specialist</span>
-                        <span className="text-white font-medium block">Nikhil Sen (SBI Underwriting)</span>
-                        <span className="text-slate-400 block">nikhil.sen@sbi.co.in</span>
+                        <span className="text-white font-medium block">
+                          {partnerBanks.find(b => b.name === activeApp.bank_name)?.admin_name || 'System Administrator'}
+                        </span>
+                        <span className="text-slate-400 block">
+                          {partnerBanks.find(b => b.name === activeApp.bank_name)?.email || 'support@capitalscale.com'}
+                        </span>
                       </div>
                     </CardContent>
                   </Card>

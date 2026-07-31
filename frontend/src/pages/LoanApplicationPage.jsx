@@ -45,10 +45,10 @@ export default function LoanApplicationPage() {
   
   const [formData, setFormData] = useState({
     bank_name: location.state?.bankName || '',
-    amount: 1000000,
-    tenure: 12,
-    purpose: 'working_capital',
-    revenue: 500000,
+    amount: '',
+    tenure: '',
+    purpose: '',
+    revenue: '',
     business_info: {
       legal_name: '',
       registration_type: 'pvt_ltd',
@@ -868,16 +868,13 @@ export default function LoanApplicationPage() {
 
                     <div className="space-y-1.5">
                       <label className="block text-xs font-semibold text-slate-300">Tenure (Months)</label>
-                      <select
+                      <input
+                        type="number"
                         value={formData.tenure}
-                        onChange={(e) => setFormData((prev) => ({ ...prev, tenure: Number(e.target.value) }))}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, tenure: e.target.value ? Number(e.target.value) : '' }))}
+                        placeholder="e.g. 12"
                         className="w-full bg-slate-950 border border-white/10 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 transition-all"
-                      >
-                        <option value={6}>6 Months</option>
-                        <option value={12}>12 Months</option>
-                        <option value={24}>24 Months</option>
-                        <option value={36}>36 Months</option>
-                      </select>
+                      />
                     </div>
 
                     <div className="space-y-1.5">
@@ -887,6 +884,7 @@ export default function LoanApplicationPage() {
                         onChange={(e) => setFormData((prev) => ({ ...prev, purpose: e.target.value }))}
                         className="w-full bg-slate-950 border border-white/10 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 transition-all"
                       >
+                        <option value="" disabled>Select Purpose</option>
                         <option value="working_capital">Working Capital</option>
                         <option value="equipment">Equipment Purchase</option>
                         <option value="expansion">Business Expansion</option>
@@ -1195,19 +1193,19 @@ export default function LoanApplicationPage() {
               <div className="space-y-3.5 text-[11px]">
                 <div className="flex justify-between">
                   <span className="text-slate-400">Principal Requested</span>
-                  <span className="text-white font-semibold">₹{formData.amount ? parseInt(formData.amount).toLocaleString() : 0}</span>
+                  <span className="text-white font-semibold">{formData.amount && currentStep > 3 ? `₹${parseInt(formData.amount).toLocaleString()}` : 'NA'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Interest Rate Estimate</span>
-                  <span className="text-white font-semibold">{interestRate}% p.a.</span>
+                  <span className="text-white font-semibold">{formData.amount && currentStep > 3 ? `${interestRate}% p.a.` : 'NA'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Tenure Selection</span>
-                  <span className="text-white font-semibold">{formData.tenure} Months</span>
+                  <span className="text-white font-semibold">{formData.tenure && currentStep > 3 ? `${formData.tenure} Months` : 'NA'}</span>
                 </div>
                 <div className="border-t border-white/5 pt-2 flex justify-between items-baseline">
                   <span className="text-slate-300 font-semibold">Monthly EMI</span>
-                  <span className="text-blue-400 text-sm font-bold">₹{emi.toLocaleString()}</span>
+                  <span className="text-blue-400 text-sm font-bold">{emi && currentStep > 3 ? `₹${emi.toLocaleString()}` : 'NA'}</span>
                 </div>
               </div>
             </div>

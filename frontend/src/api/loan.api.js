@@ -1,7 +1,3 @@
-
-
-
-
 import apiClient from './apiClient';
 
 export const loanApi = {
@@ -15,6 +11,7 @@ export const loanApi = {
   
   createDraft: (bankName) => apiClient.post('/loans/draft', { bank_name: bankName }),
   saveDraft: (id, data) => apiClient.put(`/loans/draft/${id}`, data),
+  deleteDraft: (id) => apiClient.delete(`/loans/draft/${id}`),
   submitLoan: (id) => apiClient.post(`/loans/draft/${id}/submit`),
   uploadDocument: (id, documentType, file, onUploadProgress) => {
     const formData = new FormData();

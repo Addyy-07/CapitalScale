@@ -14,6 +14,7 @@ import {
   changeLoanStatus,
   getLoanHistory,
   chatWithLoan,
+  deleteDraft,
 } from '../../controllers/loan.controller.js';
 import { protect, authorizeRoles, ROLES } from '../../middleware/auth.js';
 import { upload } from '../../middleware/upload.js';
@@ -44,6 +45,7 @@ router.post('/', authorizeRoles(ROLES.SME), createLoan);
 
 router.post('/draft', authorizeRoles(ROLES.SME), createDraft);
 router.put('/draft/:id', authorizeRoles(ROLES.SME), saveDraft);
+router.delete('/draft/:id', authorizeRoles(ROLES.SME), deleteDraft);
 router.post('/draft/:id/upload', authorizeRoles(ROLES.SME), upload.single('file'), uploadDocument);
 router.delete('/draft/:id/upload/:docType', authorizeRoles(ROLES.SME), deleteDocument);
 router.post('/draft/:id/submit', authorizeRoles(ROLES.SME), submitLoan);
