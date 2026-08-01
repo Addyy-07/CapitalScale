@@ -1,5 +1,5 @@
 import asyncHandler from '../utils/asyncHandler.js';
-import ApiResponse from '../utils/ApiResponse.js';
+import { ApiResponse } from '../utils/ApiResponse.js';
 import {
   registerSME,
   loginSME,
@@ -47,7 +47,7 @@ export const smeRegister = asyncHandler(async (req, res) => {
 
 
 export const smeLogin = asyncHandler(async (req, res) => {
-  const result = await loginSME(req.body);
+  const result = await loginSME(req.body, req.ip);
   return ApiResponse.ok(
     { mfaRequired: result.mfaRequired, tempToken: result.tempToken },
     'Credentials verified. Please enter the OTP code sent to your email.'
@@ -83,7 +83,7 @@ export const bankAdminRegister = asyncHandler(async (req, res) => {
 
 
 export const bankAdminLogin = asyncHandler(async (req, res) => {
-  const result = await loginBankAdmin(req.body);
+  const result = await loginBankAdmin(req.body, req.ip);
   return ApiResponse.ok(
     { mfaRequired: result.mfaRequired, tempToken: result.tempToken },
     'Credentials verified. Please enter the OTP code sent to your email.'

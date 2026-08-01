@@ -19,6 +19,7 @@ import {
   setSession, getSession, deleteSession,
   blacklistToken, isTokenBlacklisted,
   acquireOtpLock, releaseOtpLock,
+  incrementFailedAttempts, getFailedAttempts, clearFailedAttempts,
 } from '../config/redis.js';
 import { publishEvent } from '../notifications/index.js';
 import { NOTIFICATION_EVENTS } from '../notifications/events/notificationEvents.js';
@@ -72,13 +73,21 @@ export const registerSME = async (data, _ipAddress, _userAgent) => {
   return { mfaRequired: true, tempToken, user: sanitizeUser(user, 'sme') };
 };
 
-export const loginSME = async ({ email, password }) => {
+export const loginSME = async ({ email, password }, ipAddress) => {
+  const attempts = await getFailedAttempts(email, ipAddress);
+  if (attempts >= 5) { throw ApiError.tooManyRequests('Account locked due to too many failed attempts. Try again in 15 minutes.'); }
+
   const user = await findSMEByEmail(email, true);
   if (!user) { throw ApiError.unauthorized('Invalid email or password'); }
   if (!user.is_active) { throw ApiError.forbidden('Your account has been deactivated. Contact support.'); }
 
   const isMatch = await argon2.verify(user.password_hash, password);
-  if (!isMatch) { throw ApiError.unauthorized('Invalid email or password'); }
+  if (!isMatch) {
+    await incrementFailedAttempts(email, ipAddress);
+    throw ApiError.unauthorized('Invalid email or password');
+  }
+
+  await clearFailedAttempts(email, ipAddress);
 
   await sendMfaOtp(user.id, email);
   const tempToken = generateMfaToken({ id: user.id, email, role: 'sme' });
@@ -110,13 +119,21 @@ export const registerBankAdmin = async (data) => {
   return { mfaRequired: true, tempToken, user: sanitizeUser(user, 'bank_admin') };
 };
 
-export const loginBankAdmin = async ({ email, password }) => {
+export const loginBankAdmin = async ({ email, password }, ipAddress) => {
+  const attempts = await getFailedAttempts(email, ipAddress);
+  if (attempts >= 5) { throw ApiError.tooManyRequests('Account locked due to too many failed attempts. Try again in 15 minutes.'); }
+
   const user = await findBankAdminByEmail(email, true);
   if (!user) { throw ApiError.unauthorized('Invalid email or password'); }
   if (!user.is_active) { throw ApiError.forbidden('Your account has been deactivated. Contact support.'); }
 
   const isMatch = await argon2.verify(user.password_hash, password);
-  if (!isMatch) { throw ApiError.unauthorized('Invalid email or password'); }
+  if (!isMatch) {
+    await incrementFailedAttempts(email, ipAddress);
+    throw ApiError.unauthorized('Invalid email or password');
+  }
+
+  await clearFailedAttempts(email, ipAddress);
 
   await sendMfaOtp(user.id, email);
   const tempToken = generateMfaToken({ id: user.id, email, role: 'bank_admin' });
