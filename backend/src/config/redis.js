@@ -1,6 +1,7 @@
 import Redis from 'ioredis';
-import env from './env.js';
+
 import logger from '../utils/logger.js';
+import env from './env.js';
 
 let redisClient = null;
 
@@ -31,20 +32,20 @@ try {
 // ─── Session helpers ─────────────────────────────────────────────────────────
 
 export const setSession = async (sessionId, sessionData, ttlSeconds = 30 * 24 * 60 * 60) => {
-  if (!redisClient) return;
+  if (!redisClient) { return; }
   await redisClient.set(`session:${sessionId}`, JSON.stringify(sessionData), 'EX', ttlSeconds);
 };
 
 
 export const getSession = async (sessionId) => {
-  if (!redisClient) return null;
+  if (!redisClient) { return null; }
   const data = await redisClient.get(`session:${sessionId}`);
   return data ? JSON.parse(data) : null;
 };
 
 
 export const deleteSession = async (sessionId) => {
-  if (!redisClient) return;
+  if (!redisClient) { return; }
   await redisClient.del(`session:${sessionId}`);
 };
 
@@ -52,7 +53,7 @@ export const deleteSession = async (sessionId) => {
 // ─── Token blacklist helpers ──────────────────────────────────────────────────
 
 export const blacklistToken = async (jti, ttlSeconds = 30 * 24 * 60 * 60) => {
-  if (!redisClient) return;
+  if (!redisClient) { return; }
   await redisClient.set(`blacklist:token:${jti}`, 'revoked', 'EX', ttlSeconds);
 };
 
@@ -91,7 +92,7 @@ export const acquireOtpLock = async (userId) => {
 };
 
 export const releaseOtpLock = async (userId) => {
-  if (!redisClient) return;
+  if (!redisClient) { return; }
   await redisClient.del(`otp:verify:lock:${userId}`);
 };
 

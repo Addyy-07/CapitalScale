@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import {
@@ -268,7 +268,7 @@ export default function SMELoginPage() {
           {}
           <div className="mt-6 text-center space-y-2">
             <p className="text-slate-300 text-sm">
-              Don't have an account?{' '}
+              Don&apos;t have an account?{' '}
               <Link
                 to="/sme/register"
                 className="text-blue-400 hover:text-blue-300 font-medium transition-colors"
