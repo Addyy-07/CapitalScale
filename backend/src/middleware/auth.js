@@ -19,13 +19,19 @@ export const ROLES = Object.freeze({
 
 
 export const protect = asyncHandler(async (req, res, next) => {
+  let token;
   const authHeader = req.headers['authorization'];
 
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    throw ApiError.unauthorized('Access token is required');
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.split(' ')[1];
+  } else if (req.query && req.query.token) {
+    // Support for EventSource / SSE which cannot set custom headers
+    token = req.query.token;
   }
 
-  const token = authHeader.split(' ')[1];
+  if (!token) {
+    throw ApiError.unauthorized('Access token is required');
+  }
 
   const decoded = verifyAccessToken(token);
 

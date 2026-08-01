@@ -10,7 +10,8 @@ import { cloudinary } from '../config/cloudinary.js';
 import ApiError from '../utils/ApiError.js';
 import logger from '../utils/logger.js';
 import OcrService from './ocr.service.js';
-import EmailService from './email.service.js';
+import { publishEvent } from '../notifications/index.js';
+import { NOTIFICATION_EVENTS, loanStatusToEvent } from '../notifications/events/notificationEvents.js';
 import ExtractionService from './extraction.service.js';
 
 
@@ -224,7 +225,15 @@ const LoanService = {
           });
           const admins = await findBankAdminsByBankName(loan.bank_name);
           for (const admin of admins) {
-            await EmailService.sendMissingInfoCompleted(admin, loan).catch(() => {});
+            publishEvent(NOTIFICATION_EVENTS.LOAN_MISSING_INFO_COMPLETED, {
+              adminId: admin.id,
+              adminEmail: admin.email,
+              adminName: admin.admin_name,
+              appId: loan.app_id,
+              smeName: sme?.full_name || 'SME Applicant',
+              businessName: sme?.business_name,
+              loanId: loan.id,
+            }).catch(err => logger.error(`[Admin Event Publish] Failed: ${err.message}`));
           }
         }
       }
@@ -284,6 +293,21 @@ const LoanService = {
       changed_by: smeId, changed_by_name: sme?.full_name || 'SME Applicant',
       changed_by_model: 'SMEUser', notes: 'Initial loan application submission.',
     });
+
+    // Publish notification event for loan submission
+    try {
+      publishEvent(NOTIFICATION_EVENTS.LOAN_SUBMITTED, {
+        smeId: sme.id,
+        smeEmail: sme.email,
+        smeName: sme.full_name,
+        loanId: loan.id,
+        appId: loan.app_id,
+        bankName: loan.bank_name,
+        toStatus: 'submitted',
+      }).catch(err => logger.error(`[Loan Submit Event Publish] Failed: ${err.message}`));
+    } catch (err) {
+      logger.error(`Failed to publish loan submission event: ${err.message}`);
+    }
 
     return findLoanById(loanId);
   },
@@ -373,14 +397,25 @@ const LoanService = {
       missing_docs: toStatus === 'missing_info' ? (missingDocs || []) : [],
     });
 
-    
     try {
-      if (toStatus === 'missing_info') {
-        const sme = await findSMEById(loan.sme_id?.id || loan.sme_id);
-        if (sme) await EmailService.sendMissingInfoRequest(sme, loan, missingDocs || []);
+      const targetSmeId = loan.sme_id?.id || loan.sme_id;
+      const sme = await findSMEById(targetSmeId);
+      const eventType = loanStatusToEvent(toStatus);
+      
+      if (eventType && sme) {
+        publishEvent(eventType, {
+          smeId: sme.id,
+          smeEmail: sme.email,
+          smeName: sme.full_name,
+          loanId: loan.id,
+          appId: loan.app_id,
+          bankName: loan.bank_name,
+          toStatus,
+          missingDocs: missingDocs || [],
+        }).catch(err => logger.error(`[Loan Event Publish] Failed: ${err.message}`));
       }
-    } catch (emailErr) {
-      logger.error(`Failed to send transition email: ${emailErr.message}`);
+    } catch (err) {
+      logger.error(`Failed to publish loan status event: ${err.message}`);
     }
 
     return findLoanById(loanId);

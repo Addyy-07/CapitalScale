@@ -13,7 +13,12 @@ export const rateLimiter = rateLimit({
   max: env.RATE_LIMIT_MAX,
   standardHeaders: true, 
   legacyHeaders: false,
-  skip: (req) => req.originalUrl.includes('/queue/status'),
+  skip: (req) => {
+    const url = req.originalUrl;
+    return url.includes('/queue/status') || 
+           url.includes('/ocr/jobs') || 
+           url.includes('/notifications');
+  },
   handler: (_req, _res, next) => {
     next(ApiError.tooManyRequests('Too many requests — please try again later'));
   },

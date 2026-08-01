@@ -15,7 +15,8 @@ import {
 import ApiError from '../utils/ApiError.js';
 import logger from '../utils/logger.js';
 import { setSession, getSession, deleteSession, blacklistToken, isTokenBlacklisted } from '../config/redis.js';
-
+import { publishEvent } from '../notifications/index.js';
+import { NOTIFICATION_EVENTS } from '../notifications/events/notificationEvents.js';
 
 
 
@@ -26,6 +27,12 @@ const sendMfaOtp = async (userId, email) => {
   await deleteOtpsByUserContact(userId, email);
   await createOtp({ user_id: userId, contact: email, code, expiresInMs: 5 * 60 * 1000 });
   logger.info(`[MFA OTP LOG] Generated OTP for ${email}: ${code}`);
+  
+  // Fire-and-forget: publish to OTP queue for async email delivery
+  publishEvent(NOTIFICATION_EVENTS.AUTH_OTP_SEND, {
+    userId, email, code, expiresInMinutes: 5,
+  }).catch((err) => logger.error(`[OTP Publish] Failed: ${err.message}`));
+  
   return code;
 };
 
