@@ -12,6 +12,18 @@ services:
     networks:
       - loan_network
 
+  # ── RabbitMQ (Event Bus & Queues) ─────────────────────────────────────────
+  # Disabled since we are using CloudAMQP externally via .env
+  # rabbitmq:
+  #   image: rabbitmq:3-management-alpine
+  #   container_name: ai_loan_rabbitmq
+  #   restart: unless-stopped
+  #   ports:
+  #     - '5672:5672'
+  #     - '15672:15672'
+  #   networks:
+  #     - loan_network
+
   # ── Backend (Express.js — now using PostgreSQL only) ──────────────────────
   backend:
     build:

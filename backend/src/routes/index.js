@@ -9,6 +9,7 @@ import ocrRoutes from './v1/ocr.routes.js';
 import extractionRoutes from './v1/extraction.routes.js';
 import underwritingRoutes from './v1/underwriting.routes.js';
 import auditLogRoutes from './v1/auditLog.routes.js';
+import notificationRoutes from './v1/notification.routes.js';
 
 
 
@@ -36,5 +37,6 @@ router.use('/v1/ocr', ocrRoutes);
 router.use('/v1/extraction', extractionRoutes);
 router.use('/v1/underwriting', underwritingRoutes);
 router.use('/v1/audit-logs', auditLogRoutes);
+router.use('/v1/notifications', notificationRoutes);
 
 export default router;

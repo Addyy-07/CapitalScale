@@ -40,6 +40,8 @@ import { Upload } from '@/components/ui/upload.jsx';
 import { cn } from '@/lib/utils.js';
 import { loanApi } from '@/api/loan.api.js';
 import { bankApi } from '@/api/bank.api.js';
+import NotificationBell from '@/components/notifications/NotificationBell.jsx';
+import { useNotifications } from '@/hooks/useNotifications';
 
 export default function SMEDashboard() {
   const { user, logout } = useAuth();
@@ -489,12 +491,10 @@ export default function SMEDashboard() {
   };
 
   
-  const [notifications, setNotifications] = useState([]);
-
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const { notifications, unreadCount, markAllAsRead, markAsRead } = useNotifications();
 
   const markAllRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    markAllAsRead();
   };
 
   const deleteNotification = (id) => {
@@ -732,7 +732,10 @@ export default function SMEDashboard() {
       </aside>
 
       {}
-      <main className="flex-1 overflow-y-auto p-6 sm:p-8 space-y-6">
+      <main className="flex-1 overflow-y-auto p-6 sm:p-8 space-y-6 relative bg-[#0B1120]">
+        <div className="absolute top-6 right-8 z-50">
+          <NotificationBell />
+        </div>
         
         {}
         {}
@@ -1523,47 +1526,38 @@ export default function SMEDashboard() {
                     key={n.id}
                     className={cn(
                       'border rounded-xl p-4 transition-all flex items-start gap-3.5 justify-between relative overflow-hidden',
-                      n.read ? 'bg-white/[0.01] border-white/5' : 'bg-blue-500/[0.02] border-blue-500/20'
+                      n.is_read ? 'bg-white/[0.01] border-white/5' : 'bg-blue-500/[0.02] border-blue-500/20'
                     )}
                   >
                     {}
-                    {!n.read && (
+                    {!n.is_read && (
                       <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-500" />
                     )}
 
                     <div className="flex items-start gap-3">
-                      {n.type === 'success' ? (
-                        <div className="w-7 h-7 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <CheckCircle className="w-4 h-4" />
-                        </div>
-                      ) : n.type === 'warning' ? (
-                        <div className="w-7 h-7 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <AlertCircle className="w-4 h-4" />
-                        </div>
-                      ) : n.type === 'error' ? (
-                        <div className="w-7 h-7 rounded-full bg-red-500/10 border border-red-500/20 text-red-400 flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <AlertCircle className="w-4 h-4" />
-                        </div>
-                      ) : (
-                        <div className="w-7 h-7 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <Bell className="w-4 h-4" />
-                        </div>
-                      )}
+                      <div className="mt-1 flex-shrink-0 text-xl">
+                        {n.metadata?.icon || '📢'}
+                      </div>
 
                       <div>
-                        <p className={cn('text-xs leading-relaxed', n.read ? 'text-slate-300' : 'text-white font-medium')}>
-                          {n.text}
+                        <p className={cn('text-sm font-semibold', n.is_read ? 'text-slate-300' : 'text-white')}>
+                          {n.title}
                         </p>
-                        <span className="text-[10px] text-slate-300 mt-1 block">{n.date}</span>
+                        <p className={cn('text-xs leading-relaxed mt-1', n.is_read ? 'text-slate-400' : 'text-slate-300')}>
+                          {n.message}
+                        </p>
+                        <span className="text-[10px] text-slate-500 mt-2 block">{new Date(n.created_at).toLocaleString()}</span>
                       </div>
                     </div>
 
-                    <button
-                      onClick={() => deleteNotification(n.id)}
-                      className="p-1 rounded bg-white/5 hover:bg-white/10 text-slate-300 hover:text-slate-300 transition-all flex-shrink-0"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {!n.is_read && (
+                      <button
+                        onClick={() => markAsRead(n.id)}
+                        className="p-1 rounded bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-all flex-shrink-0 text-[10px] px-2 flex items-center gap-1"
+                      >
+                        <CheckCircle className="w-3 h-3" /> Mark Read
+                      </button>
+                    )}
                   </div>
                 ))
               ) : (

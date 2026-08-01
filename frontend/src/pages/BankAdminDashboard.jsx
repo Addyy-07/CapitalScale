@@ -32,6 +32,7 @@ import { bankApi } from '@/api/bank.api.js';
 import { underwritingApi } from '@/api/underwriting.api.js';
 import { extractionApi } from '@/api/extraction.api.js';
 import { auditLogApi } from '@/api/auditLog.api.js';
+import NotificationBell from '@/components/notifications/NotificationBell.jsx';
 
 export default function BankAdminDashboard() {
   const { user, logout, getRoleLabel } = useAuth();
@@ -790,6 +791,7 @@ export default function BankAdminDashboard() {
           </div>
 
           <div className="flex items-center gap-4">
+            <NotificationBell />
             <div className="hidden sm:flex flex-col items-end">
               <span className="text-xs font-semibold text-white">
                 {user?.admin_name}

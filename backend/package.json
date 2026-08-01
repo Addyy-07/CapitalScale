@@ -16,6 +16,7 @@
   "dependencies": {
     "@supabase/server": "^1.2.0",
     "@supabase/supabase-js": "^2.108.2",
+    "amqplib": "^2.0.1",
     "argon2": "^0.44.0",
     "axios": "^1.16.1",
     "bcryptjs": "^2.4.3",
@@ -31,6 +32,7 @@
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
     "multer": "^2.0.0",
+    "nodemailer": "^9.0.3",
     "uuid": "^11.0.0",
     "winston": "^3.13.0",
     "winston-daily-rotate-file": "^5.0.0",
