@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import {
@@ -12,34 +12,17 @@ import {
   ArrowRight,
   Loader2,
   AlertCircle,
-  CheckCircle2,
   Home,
 } from 'lucide-react';
 
 import { useAuth } from '@/context/AuthContext.jsx';
+import OtpVerificationForm from '@/components/OtpVerificationForm.jsx';
 
 
 
 
 
-const PasswordStrength = ({ password = '' }) => {
-  const checks = [
-    { label: '8+ characters', ok: password.length >= 8 },
-    { label: 'Uppercase letter', ok: /[A-Z]/.test(password) },
-    { label: 'Number', ok: /[0-9]/.test(password) },
-    { label: 'Special character', ok: /[^A-Za-z0-9]/.test(password) },
-  ];
-  return (
-    <div className="grid grid-cols-2 gap-1 mt-2">
-      {checks.map(({ label, ok }) => (
-        <div key={label} className={`flex items-center gap-1.5 text-xs ${ok ? 'text-emerald-400' : 'text-slate-300'}`}>
-          <CheckCircle2 className="w-3 h-3 flex-shrink-0" />
-          {label}
-        </div>
-      ))}
-    </div>
-  );
-};
+import PasswordStrengthMeter from '@/components/PasswordStrengthMeter.jsx';
 
 export default function BankAdminRegisterPage() {
   const navigate = useNavigate();
@@ -47,6 +30,8 @@ export default function BankAdminRegisterPage() {
 
   const [showPassword, setShowPassword] = useState(false);
   const [serverError, setServerError] = useState('');
+  const [mfaRequired, setMfaRequired] = useState(false);
+  const [tempToken, setTempToken] = useState('');
 
   const {
     register,
@@ -60,27 +45,43 @@ export default function BankAdminRegisterPage() {
   const onSubmit = async (data) => {
     setServerError('');
     try {
-      await registerBank({
+      const result = await registerBank({
         bank_name: data.bank_name,
         branch_name: data.branch_name,
+        branch_address: {
+          city: data.city,
+          state: data.state,
+          pincode: data.pincode,
+        },
         ifsc_code: data.ifsc_code,
         admin_name: data.admin_name,
         phone: data.phone,
         email: data.email,
         password: data.password,
-        branch_address: {
-          city: data.city,
-          state: data.state,
-          pincode: data.pincode,
-        }
       });
-      navigate('/dashboard', { replace: true });
+      if (result && result.mfaRequired) {
+        setMfaRequired(true);
+        setTempToken(result.tempToken);
+      } else {
+        navigate('/dashboard', { replace: true });
+      }
     } catch (err) {
       setServerError(
         err?.response?.data?.message || 'Registration failed. Please try again.'
       );
     }
   };
+
+  if (mfaRequired) {
+    return (
+      <OtpVerificationForm
+        tempToken={tempToken}
+        setTempToken={setTempToken}
+        onVerifySuccess={() => navigate('/dashboard', { replace: true })}
+        onCancel={() => setMfaRequired(false)}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-emerald-950 to-slate-900 flex items-center justify-center p-4 py-12">
@@ -273,7 +274,7 @@ export default function BankAdminRegisterPage() {
                 </button>
               </div>
               {errors.password && <p className="text-red-400 text-xs">{errors.password.message}</p>}
-              <PasswordStrength password={password} />
+              <PasswordStrengthMeter password={password} />
             </div>
 
             {}

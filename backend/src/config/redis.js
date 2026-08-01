@@ -1,6 +1,7 @@
 import Redis from 'ioredis';
 
 import logger from '../utils/logger.js';
+
 import env from './env.js';
 
 let redisClient = null;
@@ -94,6 +95,32 @@ export const acquireOtpLock = async (userId) => {
 export const releaseOtpLock = async (userId) => {
   if (!redisClient) { return; }
   await redisClient.del(`otp:verify:lock:${userId}`);
+};
+
+
+// ─── Brute Force Lockout Helpers ──────────────────────────────────────────────
+export const incrementFailedAttempts = async (email, ipAddress) => {
+  if (!redisClient) { return; }
+  const key = `lockout:failed:${email}:${ipAddress}`;
+  const attempts = await redisClient.incr(key);
+  if (attempts === 1) {
+    // 15-minute lockout window
+    await redisClient.expire(key, 15 * 60);
+  }
+  return attempts;
+};
+
+export const getFailedAttempts = async (email, ipAddress) => {
+  if (!redisClient) { return 0; }
+  const key = `lockout:failed:${email}:${ipAddress}`;
+  const attempts = await redisClient.get(key);
+  return attempts ? parseInt(attempts, 10) : 0;
+};
+
+export const clearFailedAttempts = async (email, ipAddress) => {
+  if (!redisClient) { return; }
+  const key = `lockout:failed:${email}:${ipAddress}`;
+  await redisClient.del(key);
 };
 
 

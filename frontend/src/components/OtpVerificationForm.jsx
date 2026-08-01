@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Lock, AlertCircle, Loader2, ArrowRight, RotateCw } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext.jsx';
 
