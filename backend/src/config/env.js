@@ -15,9 +15,13 @@ const envSchema = z.object({
 
   // ── JWT ───────────────────────────────────────────────────────────────────
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
-  JWT_EXPIRES_IN: z.string().default('7d'),
-  JWT_REFRESH_SECRET: z.string().min(32).optional(),
+  JWT_EXPIRES_IN: z.string().default('2h'),
+  JWT_REFRESH_SECRET: z.string().min(32, 'JWT_REFRESH_SECRET must be at least 32 characters'),
   JWT_REFRESH_EXPIRES_IN: z.string().default('30d'),
+  // Separate secret ONLY for MFA temp tokens — must be distinct from JWT_SECRET
+  JWT_MFA_SECRET: z.string().min(32, 'JWT_MFA_SECRET must be at least 32 characters'),
+  // Shared secret for internal AI-service → backend callbacks
+  BACKEND_CALLBACK_SECRET: z.string().min(16, 'BACKEND_CALLBACK_SECRET must be at least 16 characters'),
 
   // ── Redis ─────────────────────────────────────────────────────────────────
   REDIS_URL: z.string().url().default('redis://localhost:6379'),

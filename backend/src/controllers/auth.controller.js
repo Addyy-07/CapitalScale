@@ -124,7 +124,10 @@ export const verifyMfa = asyncHandler(async (req, res) => {
 
 
 export const refresh = asyncHandler(async (req, res) => {
-  const token = req.cookies?.refreshToken || req.body?.refreshToken;
+  // BUG-11 FIX: Refresh token is accepted ONLY from the httpOnly cookie.
+  // Accepting it from req.body would defeat the purpose of httpOnly storage
+  // and enable CSRF-based token theft.
+  const token = req.cookies?.refreshToken;
 
   const result = await refreshAccessToken(token, req.ip, req.headers['user-agent']);
 

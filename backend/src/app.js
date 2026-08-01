@@ -6,7 +6,6 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 
 import env from './config/env.js';
-import logger from './utils/logger.js';
 import requestLogger from './middleware/requestLogger.js';
 import errorHandler from './middleware/errorHandler.js';
 import { rateLimiter } from './middleware/rateLimiter.js';

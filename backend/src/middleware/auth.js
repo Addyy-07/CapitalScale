@@ -3,17 +3,16 @@ import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { getSession, setSession } from '../config/redis.js';
 import { getRolePermissions } from '../db/queries/users.queries.js';
-
+import env from '../config/env.js';
 
 
 
 
 export const ROLES = Object.freeze({
-  SME: 'sme',
-  BANK_ADMIN: 'bank_admin',
+  SME:         'sme',
+  BANK_ADMIN:  'bank_admin',
   SUPER_ADMIN: 'super_admin',
 });
-
 
 
 
@@ -35,17 +34,16 @@ export const protect = asyncHandler(async (req, res, next) => {
 
   const decoded = verifyAccessToken(token);
 
-  
+  // Verify server-side session exists (allows instant revocation on logout)
   const session = await getSession(decoded.sessionId);
   if (!session) {
     throw ApiError.unauthorized('Session has expired or was revoked');
   }
 
-  req.user = decoded;  
+  req.user = decoded;
 
   next();
 });
-
 
 
 
@@ -68,8 +66,6 @@ export const authorizeRoles = (...allowedRoles) =>
 
 
 
-
-
 export const authorizePermissions = (...requiredPermissions) =>
   asyncHandler(async (req, _res, next) => {
     if (!req.user) {
@@ -83,11 +79,10 @@ export const authorizePermissions = (...requiredPermissions) =>
 
     let permissions = session.permissions;
 
-    
+    // Lazy-load permissions into session on first use to avoid per-request DB calls
     if (!permissions) {
       permissions = await getRolePermissions(req.user.role_id);
-      
-      
+
       session.permissions = permissions;
       await setSession(req.user.sessionId, session);
     }
@@ -101,20 +96,26 @@ export const authorizePermissions = (...requiredPermissions) =>
   });
 
 
+// ─── BUG-03 FIX: Internal-secret guard for AI-service → backend callbacks ────
+// The Python AI service sends x-internal-secret on all backend callbacks.
+// This guard verifies that header so the markVectorized endpoint (and any
+// future internal callbacks) cannot be called by unauthenticated external actors.
+export const requireInternalSecret = (req, _res, next) => {
+  const secret = req.headers['x-internal-secret'];
+
+  if (!secret || secret !== env.BACKEND_CALLBACK_SECRET) {
+    // Do NOT reveal what header is expected — just return 403
+    return next(ApiError.forbidden('Forbidden'));
+  }
+
+  next();
+};
 
 
 
 
-export const requireSME = [protect, authorizeRoles(ROLES.SME)];
-
-
-export const requireBankAdmin = [protect, authorizeRoles(ROLES.BANK_ADMIN)];
-
-
+export const requireSME        = [protect, authorizeRoles(ROLES.SME)];
+export const requireBankAdmin  = [protect, authorizeRoles(ROLES.BANK_ADMIN)];
 export const requireSuperAdmin = [protect, authorizeRoles(ROLES.SUPER_ADMIN)];
-
-
 export const requireBankOrSuper = [protect, authorizeRoles(ROLES.BANK_ADMIN, ROLES.SUPER_ADMIN)];
-
-
-export const requireAuth = [protect];
+export const requireAuth       = [protect];

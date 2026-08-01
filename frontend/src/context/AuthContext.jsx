@@ -1,5 +1,4 @@
-import React, { createContext, useContext, useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { createContext, useContext, useCallback, useEffect, useState } from 'react';
 
 import { authApi } from '@/api/auth.api.js';
 import { useAuthStore } from '@/store/authStore.js';
@@ -52,7 +51,7 @@ export function AuthProvider({ children }) {
       setIsInitializing(false);
     };
     tryRefresh();
-  }, []); 
+  }, [clearAuth]); 
 
 
   
@@ -131,8 +130,8 @@ export function AuthProvider({ children }) {
   const logout = useCallback(async () => {
     try {
       await authApi.logout();
-    } catch {
-      
+    } catch (err) {
+      console.error('Logout failed:', err);
     } finally {
       clearAuth();
     }
@@ -159,6 +158,7 @@ export function AuthProvider({ children }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) {

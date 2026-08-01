@@ -1,6 +1,6 @@
 import express from 'express';
 import multer from 'multer';
-import { protect } from '../../middleware/auth.js';
+import { protect, requireInternalSecret } from '../../middleware/auth.js';
 import ApiError from '../../utils/ApiError.js';
 import {
   uploadAndProcess,
@@ -57,9 +57,14 @@ const ocrUpload = multer({
 
 
 
-router.patch('/jobs/:jobId/vectorized', markVectorized);
+// ─── Internal-only callback route (AI service → backend) ─────────────────────
+// MUST come before router.use(protect) so we can apply the internal-secret
+// guard instead of the user JWT guard.
+// BUG-03 FIX: previously had zero authentication.
+router.patch('/jobs/:jobId/vectorized', requireInternalSecret, markVectorized);
 
 
+// All routes below require a valid user JWT.
 router.use(protect);
 
 
