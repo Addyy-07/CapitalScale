@@ -1,23 +1,30 @@
 # CapitalScale — Comprehensive Project Analysis Report
 
 > **AI-Powered SME Loan Underwriting Platform**
-> Date: 30 July 2026 | Codebase Version: 1.0.0 (Backend) / 2.0.0 (AI Services)
+> Date: 01 August 2026 | Codebase Scan: Complete
 
 ---
 
 ## 1. Executive Summary
 
-**CapitalScale** is a production-grade, AI-powered **SME (Small & Medium Enterprise) Loan Underwriting Platform** built as a full-stack monorepo. It automates the traditionally manual, time-consuming process of evaluating SME loan applications by leveraging **OCR document processing**, **LLM-based parameter extraction**, **RAG (Retrieval-Augmented Generation) chat**, and **AI credit underwriting** — all orchestrated through a three-tier microservices architecture.
+**CapitalScale** is a production-grade, AI-powered **SME (Small & Medium Enterprise) Loan Underwriting Platform** built as a full-stack monorepo. It automates the traditionally manual, time-consuming process of evaluating SME loan applications by leveraging:
+
+- **PaddleOCR + pdfplumber** for document text extraction
+- **Domain-aware RAG chunking strategies** for financial document intelligence
+- **Google Gemini LLM** for 30+ parameter extraction, underwriting assessment, and conversational Q&A
+- **RabbitMQ event-driven notifications** (OTP, loan status emails, in-app alerts)
+- **Server-Sent Events (SSE) + Redis Pub/Sub** for real-time, horizontally-scalable frontend push
 
 ### Core Value Proposition
 
 | Problem | CapitalScale Solution |
 |---|---|
-| Manual document review takes days | PaddleOCR extracts text from PDFs/images in seconds |
-| Underwriters miss financial data across docs | LLM extracts 30+ financial parameters automatically |
-| Bank policy compliance is subjective | AI evaluates every extracted parameter against bank-specific rules |
-| Communication gaps between banks & SMEs | Real-time status tracking, MFA-secured portals for both roles |
-| No audit trail for decisions | Every action logged with full audit history |
+| Manual document review takes days | PaddleOCR + pdfplumber extracts text from PDFs/images in seconds |
+| Underwriters miss financial data across docs | LLM extracts 30+ financial parameters automatically with confidence scoring |
+| Bank policy compliance is subjective | AI evaluates every parameter against bank-specific underwriting rules |
+| Communication gaps between banks & SMEs | Real-time SSE notifications + email templates for every loan status change |
+| OTP delivery is unreliable | RabbitMQ `otp_queue` (priority 10) with retry logic (up to 10 attempts) and Dead Letter Queue |
+| No audit trail for decisions | Every action logged with IP, user agent, actor ID, and timestamp |
 
 ---
 
@@ -30,45 +37,51 @@ graph TD
     subgraph "Frontend — React + Vite (Port 3000)"
         FE[React 18 SPA]
         FE_AUTH[AuthContext + Zustand Store]
-        FE_API[Axios API Client Layer]
+        FE_NOTIF[NotificationContext — SSE + Polling]
+        FE_API[Axios API Client — Bearer + Refresh Interceptor]
     end
 
     subgraph "Backend — Express.js (Port 5000)"
         BE_MW[Middleware: Helmet, CORS, RateLimiter, Auth]
         BE_ROUTES[Versioned Routes: /api/v1/*]
-        BE_CTRL[Controllers: Auth, Loan, OCR, Extraction, Underwriting, Bank, Policy, AuditLog]
+        BE_CTRL[Controllers: Auth, Loan, OCR, Extraction, Underwriting, Bank, Policy, Notification, AuditLog]
         BE_SVC[Services: Business Logic Layer]
-        BE_REPO[Repositories: Data Access Layer]
+        BE_NOTIF[Notifications: Publisher, Workers, SSE Manager, Templates]
     end
 
     subgraph "AI Services — FastAPI/Python (Port 5001)"
-        AI_OCR[PaddleOCR Queue Worker]
+        AI_OCR[PaddleOCR + pdfplumber Queue Worker]
+        AI_CHUNK[Chunking Strategy Factory]
         AI_EXTRACT[Parameter Extraction Service]
         AI_UW[Underwriting Assessment Engine]
         AI_CHAT[RAG Chat Engine]
-        AI_VDB[pgvector Store + Reranker]
+        AI_VDB[pgvector Store + CrossEncoder Reranker]
         AI_LLM[LLM Facade: Gemini + OpenAI]
     end
 
-    subgraph "Data Layer"
+    subgraph "Data & Messaging Layer"
         SUPA[(Supabase / PostgreSQL)]
-        REDIS[(Redis: Sessions + Token Blacklist)]
-        CLOUD[(Cloudinary: File Storage)]
-        PGVEC[(pgvector: Embeddings)]
+        REDIS[(Redis: Sessions + Blacklist + Pub/Sub + Email Rate Limit)]
+        CLOUD[(Cloudinary: Document Storage)]
+        PGVEC[(pgvector: 768-dim Embeddings)]
+        RABBIT[(RabbitMQ: otp_queue + notification_queue + DLQ)]
     end
 
     FE --> |HTTP/REST| BE_ROUTES
+    FE_NOTIF --> |SSE EventSource| BE_NOTIF
     FE_API --> |Bearer JWT| BE_MW
-    BE_SVC --> |HTTP/REST| AI_OCR
+    BE_SVC --> |HTTP/REST + x-internal-secret| AI_OCR
     BE_SVC --> |HTTP/REST| AI_EXTRACT
     BE_SVC --> |HTTP/REST| AI_UW
     BE_CTRL --> |HTTP/REST| AI_CHAT
-    BE_REPO --> SUPA
+    BE_SVC --> SUPA
     BE_MW --> REDIS
+    BE_NOTIF --> RABBIT
+    BE_NOTIF --> REDIS
     BE_SVC --> CLOUD
     AI_VDB --> PGVEC
-    AI_LLM --> |API| Gemini/OpenAI
-    AI_OCR --> |Callback| BE_ROUTES
+    AI_LLM --> |API| Gemini
+    AI_OCR --> |Callback + x-internal-secret| BE_ROUTES
 ```
 
 ---
@@ -79,60 +92,72 @@ graph TD
 
 | Technology | Version | Purpose |
 |---|---|---|
-| [React](file:///e:/Desktop/Web%20Development/CapitalScale/frontend/package.json) | 18.3.1 | Core UI framework |
+| React | 18.3.1 | Core UI framework |
 | Vite | 5.2.13 | Build tool & dev server |
 | Tailwind CSS | 3.4.4 | Utility-first styling |
 | shadcn/ui (Radix) | Multiple | Accessible UI component primitives |
 | Zustand | 4.5.2 | Lightweight global state management |
 | React Router DOM | 6.23.1 | Client-side routing |
-| Axios | 1.7.2 | HTTP client with interceptors |
+| Axios | 1.7.2 | HTTP client with request/response interceptors |
 | React Hook Form | 7.52.0 | Form state management |
 | Lucide React | 0.395.0 | Icon library |
-| React Markdown | 10.1.0 | Markdown rendering (for AI chat responses) |
+| React Markdown | 10.1.0 | Markdown rendering for AI chat responses |
+| EventSource (native) | Browser API | SSE connection in `NotificationContext.jsx` |
 
 ### 3.2 Backend
 
 | Technology | Version | Purpose |
 |---|---|---|
-| [Express.js](file:///e:/Desktop/Web%20Development/CapitalScale/backend/package.json) | 4.19.2 | HTTP framework |
+| Express.js | 4.19.2 | HTTP framework |
 | Supabase JS | 2.108.2 | PostgreSQL client via Supabase |
-| Argon2 | 0.44.0 | Password hashing (memory-hard) |
-| JSON Web Token | 9.0.2 | JWT generation & verification |
-| ioredis | 5.11.1 | Redis client for sessions |
+| amqplib | 2.0.1 | RabbitMQ AMQP 0-9-1 client |
+| Argon2 | 0.44.0 | Password hashing (memory-hard, GPU-resistant) |
+| JSON Web Token | 9.0.2 | JWT generation & verification (3-secret, audience-scoped) |
+| ioredis | 5.11.1 | Redis client — sessions, blacklist, Pub/Sub, email rate limit |
+| nodemailer | 9.0.3 | SMTP email sending (consumed by OTP & email workers) |
 | Cloudinary | 2.2.0 | Cloud file storage |
-| Multer | 2.0.0 | Multipart file upload handling |
-| Zod | 3.23.8 | Runtime validation (env + request schemas) |
-| Helmet | 7.1.0 | Security headers |
+| Multer | 2.0.0 | Multipart file upload (memory storage, 50MB limit) |
+| Zod | 3.23.8 | Runtime environment & request schema validation |
+| Helmet | 7.1.0 | Security headers (CSP, HSTS, X-Frame-Options) |
 | Winston | 3.13.0 | Structured JSON logging with daily rotation |
-| Morgan | 1.10.0 | HTTP request logging |
-| express-rate-limit | 7.3.1 | API rate limiting |
+| Morgan | 1.10.0 | HTTP request access logging |
+| express-rate-limit | 7.3.1 | API rate limiting (global, auth, OTP buckets) |
+| uuid | 11.0.0 | UUID v4 generation for JTI, correlation IDs |
 
 ### 3.3 AI Services (Python)
 
 | Technology | Purpose |
 |---|---|
-| [FastAPI](file:///e:/Desktop/Web%20Development/CapitalScale/ai-services-python/main.py) | Async HTTP framework |
-| asyncpg | PostgreSQL async driver (connection pooling) |
-| PaddleOCR v4 | Document OCR (text extraction from images/PDFs) |
-| Google Gemini (gemini-1.5-pro, gemini-2.5-flash) | Primary LLM for chat, extraction, underwriting |
-| OpenAI (gpt-4o-mini) | Fallback LLM provider |
-| text-embedding-004 (Gemini) | 768-dimensional text embeddings |
+| FastAPI | Async HTTP framework with lifespan context manager |
+| asyncpg | PostgreSQL async driver (connection pooling min 5 / max 20) |
+| PaddleOCR v4 (2.7.3) | Deep-learning OCR for images and scanned PDFs |
+| pdfplumber 0.11.4 | Native PDF text + table extraction (Markdown table output) |
+| pdf2image + Pillow | PDF-to-image conversion for scanned PDF fallback |
+| python-docx | DOCX document parsing |
+| Google Generative AI 0.8.3 | Gemini `gemini-1.5-pro`, `gemini-2.5-flash`, `text-embedding-004` |
+| OpenAI 1.59.3 | `gpt-4o-mini` fallback LLM |
+| sentence-transformers | CrossEncoder `ms-marco-MiniLM-L-6-v2` for re-ranking |
 | pgvector | Vector similarity search in PostgreSQL |
-| cross-encoder/ms-marco-MiniLM-L-6-v2 | Cross-encoder reranker for RAG retrieval |
-| Pydantic / Pydantic Settings | Configuration validation |
-| Loguru | Structured logging with rotation |
-| Uvicorn | ASGI server |
+| tenacity | Retry logic for LLM/OCR transient failures |
+| json-repair | Fixes truncated/broken JSON from LLM responses |
+| Loguru | Structured logging with rotation and compression |
+| Uvicorn | ASGI server (single worker for sequential processing queue) |
+| httpx + aiohttp | Async HTTP clients for backend callbacks |
 
 ### 3.4 Infrastructure
 
-| Component | Technology |
-|---|---|
-| Database | PostgreSQL (Supabase-hosted) |
-| Vector Store | pgvector extension on same PostgreSQL |
-| Session Store | Redis 7 Alpine |
-| File Storage | Cloudinary |
-| Containerization | Docker + Docker Compose |
-| Cloud Deployment | Render.com (Docker-based) + Vercel (Frontend) |
+| Component | Technology | Notes |
+|---|---|---|
+| Database | PostgreSQL (Supabase-hosted) | Backend uses Supabase JS; AI uses asyncpg directly |
+| Vector Store | pgvector extension | HNSW index (m=16, ef_construction=64) + GIN trigram index |
+| Session Store | Redis | `session:<jti>` with 30-day TTL |
+| Token Blacklist | Redis | `blacklist:token:<jti>` with 30-day TTL; fail-safe deny on Redis down |
+| Email Rate Limit | Redis | Sliding window per-minute; `OTP_RATE_RESERVE` slots for OTP |
+| Real-time Pub/Sub | Redis | `sse:user:<userId>` channels for multi-instance SSE sync |
+| Message Broker | RabbitMQ (CloudAMQP) | Managed externally; Docker container commented out |
+| File Storage | Cloudinary | Loan documents uploaded via `upload_stream` |
+| Containerization | Docker + Docker Compose | 4 services: Redis, Backend, AI, Frontend |
+| Cloud Deployment | Render.com + Vercel | Frontend on Vercel; Backend + AI on Render (Docker) |
 
 ---
 
@@ -142,381 +167,328 @@ graph TD
 
 #### 4.1.1 Routing & Pages
 
-The application is a **Single Page Application (SPA)** with role-based routing defined in [App.jsx](file:///e:/Desktop/Web%20Development/CapitalScale/frontend/src/App.jsx):
-
 | Route | Page | Access |
 |---|---|---|
-| `/` / `/login` | [LoginPage](file:///e:/Desktop/Web%20Development/CapitalScale/frontend/src/pages/LoginPage.jsx) | Public — role selection portal |
-| `/sme/login` | [SMELoginPage](file:///e:/Desktop/Web%20Development/CapitalScale/frontend/src/pages/SMELoginPage.jsx) | Public — SME applicant login |
-| `/sme/register` | [SMERegisterPage](file:///e:/Desktop/Web%20Development/CapitalScale/frontend/src/pages/SMERegisterPage.jsx) | Public — SME registration |
-| `/bank/login` | [BankAdminLoginPage](file:///e:/Desktop/Web%20Development/CapitalScale/frontend/src/pages/BankAdminLoginPage.jsx) | Public — Bank admin login |
-| `/bank/register` | [BankAdminRegisterPage](file:///e:/Desktop/Web%20Development/CapitalScale/frontend/src/pages/BankAdminRegisterPage.jsx) | Public — Bank admin registration |
-| `/dashboard` | [DashboardPage](file:///e:/Desktop/Web%20Development/CapitalScale/frontend/src/pages/DashboardPage.jsx) → [SMEDashboard](file:///e:/Desktop/Web%20Development/CapitalScale/frontend/src/pages/SMEDashboard.jsx) or [BankAdminDashboard](file:///e:/Desktop/Web%20Development/CapitalScale/frontend/src/pages/BankAdminDashboard.jsx) | Protected — role-adaptive |
-| `/loan/apply` | [LoanApplicationPage](file:///e:/Desktop/Web%20Development/CapitalScale/frontend/src/pages/LoanApplicationPage.jsx) | Protected — SME only |
-| `/unauthorized` | [UnauthorizedPage](file:///e:/Desktop/Web%20Development/CapitalScale/frontend/src/pages/UnauthorizedPage.jsx) | Public |
+| `/` / `/login` | LoginPage | Public — role selection portal |
+| `/sme/login` | SMELoginPage | Public |
+| `/sme/register` | SMERegisterPage | Public |
+| `/bank/login` | BankAdminLoginPage | Public |
+| `/bank/register` | BankAdminRegisterPage | Public |
+| `/dashboard` | DashboardPage → SMEDashboard or BankAdminDashboard | Protected — role-adaptive |
+| `/loan/apply` | LoanApplicationPage | Protected — SME only |
+| `/unauthorized` | UnauthorizedPage | Public |
 
 #### 4.1.2 Authentication Flow
-
-The auth system uses a **two-phase MFA flow** managed by [AuthContext](file:///e:/Desktop/Web%20Development/CapitalScale/frontend/src/context/AuthContext.jsx) + [authStore](file:///e:/Desktop/Web%20Development/CapitalScale/frontend/src/store/authStore.js) (Zustand with persistence):
 
 ```mermaid
 sequenceDiagram
     participant User
     participant Frontend
     participant Backend
+    participant RabbitMQ
     participant Redis
 
     User->>Frontend: Enter email + password
     Frontend->>Backend: POST /auth/sme/login
-    Backend->>Backend: Verify credentials (Argon2)
-    Backend->>Backend: Generate OTP + tempToken (JWT)
-    Backend-->>Frontend: { mfaRequired: true, tempToken }
+    Backend->>Backend: argon2.verify(password)
+    Backend->>Backend: Generate OTP + HMAC-SHA256 hash → store hash in DB
+    Backend->>RabbitMQ: publishEvent(AUTH_OTP_SEND) — priority 10
+    RabbitMQ->>Backend: otpWorker consumes, sends SMTP email
+    Backend-->>Frontend: { mfaRequired: true, tempToken (JWT_MFA_SECRET, 5m) }
     Frontend->>User: Show OTP input screen
     User->>Frontend: Enter 6-digit OTP
     Frontend->>Backend: POST /auth/mfa/verify { tempToken, code }
-    Backend->>Backend: Verify OTP (3 attempts max, 5min expiry)
-    Backend->>Redis: Store session (jti)
-    Backend-->>Frontend: { accessToken, refreshToken (httpOnly cookie) }
-    Frontend->>Frontend: Store user + accessToken in Zustand
+    Backend->>Redis: acquireOtpLock(userId) — SET NX EX 15
+    Backend->>Backend: verifyOtpCode(code, storedHash) using timingSafeEqual
+    Backend->>Redis: setSession(jti, sessionData)
+    Backend-->>Frontend: { accessToken, user } + Set-Cookie: refreshToken (httpOnly)
+    Frontend->>Frontend: accessToken in Zustand (memory only), user in localStorage
 ```
 
-**Key security features:**
-- **Argon2** password hashing (memory-hard, resistant to GPU attacks)
-- **MFA via email OTP** with 5-minute expiry and 3-attempt lockout
-- **JWT access tokens** (short-lived) + **Refresh tokens** (httpOnly cookies, 30-day)
-- **Redis session tracking** — each JWT is tied to a server-side session
-- **Refresh token rotation** — old token blacklisted on each refresh
-- **Token reuse detection** — reused refresh tokens trigger fraud audit log
+**Key Security Features:**
+- **Three JWT secrets** with `audience` claims — cross-token substitution attacks impossible
+- **OTP stored as HMAC-SHA256 hash** — never plaintext in DB
+- **Redis distributed lock** on OTP verification — prevents concurrent brute-force race condition
+- **Refresh token rotation** — each refresh blacklists old JTI, issues new pair
+- **Fail-safe Redis deny** — if Redis is down, all tokens treated as blacklisted
 
-#### 4.1.3 API Client Architecture
+#### 4.1.3 Notification Context
 
-The [apiClient](file:///e:/Desktop/Web%20Development/CapitalScale/frontend/src/api/apiClient.js) implements a sophisticated Axios instance with:
+`NotificationContext.jsx` wraps the entire app and provides:
+1. **Initial fetch** — REST `GET /api/v1/notifications` on login
+2. **SSE connection** — `EventSource` to `/api/v1/notifications/sse?token=<accessToken>` (token passed as query param since `EventSource` cannot set custom headers)
+3. **Auto-reconnect** — 5-second backoff on SSE error
+4. **Polling fallback** — `setInterval` every 30s catches any silent SSE drops
+5. **Optimistic UI** — `markAsRead` / `markAllAsRead` update local state immediately
 
-- **Request interceptor**: Auto-attaches `Bearer` token from Zustand store
-- **Response interceptor**: Handles 401s with automatic token refresh
-- **Concurrent request queue**: While refreshing, queues parallel failed requests and replays them with the new token
-- **Auto-redirect**: On refresh failure, clears auth state and redirects to `/login`
+#### 4.1.4 API Client Architecture
 
-#### 4.1.4 API Modules
-
-| Module | File | Endpoints |
-|---|---|---|
-| Auth | [auth.api.js](file:///e:/Desktop/Web%20Development/CapitalScale/frontend/src/api/auth.api.js) | SME/Bank login, register, MFA verify, refresh, logout |
-| Loans | [loan.api.js](file:///e:/Desktop/Web%20Development/CapitalScale/frontend/src/api/loan.api.js) | CRUD, drafts, document upload, submit, status change, chat, history |
-| Banks | [bank.api.js](file:///e:/Desktop/Web%20Development/CapitalScale/frontend/src/api/bank.api.js) | Account linking (OTP-based), policy management, policy chat |
-| Underwriting | [underwriting.api.js](file:///e:/Desktop/Web%20Development/CapitalScale/frontend/src/api/underwriting.api.js) | AI assessment, report, re-evaluation, rule inventory, audit logs |
-| Extraction | [extraction.api.js](file:///e:/Desktop/Web%20Development/CapitalScale/frontend/src/api/extraction.api.js) | Trigger extraction, get results |
-| Audit Logs | [auditLog.api.js](file:///e:/Desktop/Web%20Development/CapitalScale/frontend/src/api/auditLog.api.js) | View audit trail |
+- **Request interceptor**: Auto-attaches `Authorization: Bearer <token>` from Zustand
+- **Response interceptor (401 handling)**: Mutex pattern (`isRefreshing` flag + `failedQueue`) — queues concurrent requests, refreshes once, replays all with new token
+- Auto-redirects to `/login` on refresh failure
 
 ---
 
 ### 4.2 Backend (Express.js)
 
-#### 4.2.1 Application Bootstrap
+#### 4.2.1 Server Bootstrap (`server.js`)
 
-The server starts in [server.js](file:///e:/Desktop/Web%20Development/CapitalScale/backend/server.js):
-
-1. **Loads environment** via `dotenv/config`
-2. **Validates all env vars** using [Zod schema](file:///e:/Desktop/Web%20Development/CapitalScale/backend/src/config/env.js) (fails fast on invalid config)
-3. **Initializes Supabase client** ([supabaseClient.js](file:///e:/Desktop/Web%20Development/CapitalScale/backend/src/db/supabaseClient.js))
-4. **Initializes Cloudinary** for file uploads
-5. **Creates Express app** with full middleware stack ([app.js](file:///e:/Desktop/Web%20Development/CapitalScale/backend/src/app.js))
-6. **Starts HTTP server** on configured port (default 5000)
-7. **Sets server timeout** to 600s (10 minutes — for long OCR/AI operations)
-8. **Graceful shutdown** handlers for SIGTERM/SIGINT
+Startup order:
+1. Load & validate environment via Zod (`env.js`) — hard exit on invalid config
+2. Initialize Cloudinary
+3. `initSSEManager()` — subscribes to Redis Pub/Sub for cross-instance SSE delivery
+4. `verifySmtpConnection()` — validates SMTP credentials on startup
+5. `connectRabbitMQ()` — establishes AMQP connection, asserts topology
+6. `startOTPWorker()` — begins consuming `otp_queue` (prefetch 1)
+7. `startEmailWorker()` — begins consuming `notification_queue` (prefetch 1)
+8. `startDLQProcessor()` — monitors `dead_letter_queue`
+9. `createApp()` — Express middleware stack + routes
+10. `server.listen()` — HTTP server with 600s timeout for long AI operations
+11. Graceful shutdown: `closeRabbitMQ()` + `server.close()` on SIGTERM/SIGINT
 
 #### 4.2.2 Middleware Pipeline
 
-Applied in order in [app.js](file:///e:/Desktop/Web%20Development/CapitalScale/backend/src/app.js):
-
-| Order | Middleware | File | Purpose |
-|---|---|---|---|
-| 1 | Helmet | Built-in | Security headers (CSP, HSTS, etc.) |
-| 2 | CORS | Built-in | Origin whitelist with credentials support |
-| 3 | Body Parser | Built-in | JSON + URL-encoded (10MB limit) |
-| 4 | Cookie Parser | Built-in | Parse httpOnly cookies (refresh tokens) |
-| 5 | Request Logger | [requestLogger.js](file:///e:/Desktop/Web%20Development/CapitalScale/backend/src/middleware/requestLogger.js) | Morgan HTTP access logs |
-| 6 | Rate Limiter | [rateLimiter.js](file:///e:/Desktop/Web%20Development/CapitalScale/backend/src/middleware/rateLimiter.js) | 100 req/15min per IP (configurable) |
-| 7 | Router | [routes/index.js](file:///e:/Desktop/Web%20Development/CapitalScale/backend/src/routes/index.js) | All versioned API routes |
-| 8 | 404 Handler | Inline | Catch-all for undefined routes |
-| 9 | Error Handler | [errorHandler.js](file:///e:/Desktop/Web%20Development/CapitalScale/backend/src/middleware/errorHandler.js) | Centralized error formatting |
+| Order | Middleware | Purpose |
+|---|---|---|
+| 1 | Helmet | Security headers (CSP, HSTS, X-Frame-Options) |
+| 2 | CORS | Origin whitelist; credentials enabled |
+| 3 | Body Parser | JSON + URL-encoded (10MB limit) |
+| 4 | Cookie Parser | Parse httpOnly refresh token cookies |
+| 5 | Morgan | HTTP access logging (skips `/queue/status` to avoid log spam) |
+| 6 | Rate Limiter | 100 req/15min per IP; skips `/queue/status` polling endpoints |
+| 7 | Router | All `/api/v1/*` routes |
+| 8 | 404 Handler | Catch-all for undefined routes |
+| 9 | Error Handler | Centralized error formatting (JWT errors, Zod errors, ApiError) |
 
 #### 4.2.3 API Routes (v1)
 
-All routes are prefixed with `/api/v1/` and defined in [routes/v1/](file:///e:/Desktop/Web%20Development/CapitalScale/backend/src/routes/v1):
-
-| Route Group | Key Endpoints | Auth Required |
+| Route Group | Key Endpoints | Auth |
 |---|---|---|
-| `/auth` | `POST /sme/register`, `POST /sme/login`, `POST /bank/register`, `POST /bank/login`, `POST /mfa/verify`, `POST /refresh`, `POST /logout`, `GET /me` | Varies |
-| `/loans` | `GET /`, `POST /`, `GET /:id`, `PATCH /:id`, `DELETE /:id`, `POST /draft`, `PUT /draft/:id`, `POST /draft/:id/submit`, `POST /draft/:id/upload`, `DELETE /draft/:id/upload/:docType`, `POST /:id/status`, `GET /:id/history`, `POST /draft/:id/chat` | SME / Bank Admin |
-| `/banks` | `GET /accounts`, `POST /otp/send`, `POST /otp/verify`, `DELETE /accounts/:id` | SME |
-| `/bank-policies` | `GET /`, `POST /`, `PUT /:id`, `DELETE /:id`, `POST /:id/extract` | Bank Admin |
-| `/ocr` | `POST /upload`, `GET /jobs/:jobId`, `GET /jobs`, `POST /retry/:jobId`, `GET /stats`, `GET /jobs/:jobId/full`, `PATCH /jobs/:jobId/vectorized` | Auth |
-| `/extraction` | `POST /loans/:loanId/extract`, `POST /loans/:loanId/re-extract`, `GET /loans/:loanId/result`, `POST /loans/:loanId/extraction-status`, `POST /loans/:loanId/missing-info` | Bank Admin |
-| `/underwriting` | `POST /loans/:loanId/assess`, `GET /loans/:loanId/report`, `POST /loans/:loanId/reevaluate`, `POST /loans/:loanId/notify-policy-issue`, `GET /queue/status/:jobId`, `GET /inventory/:bankName`, `GET /loans/:loanId/audit-logs` | Bank Admin |
+| `/auth` | `POST /sme/register`, `/sme/login`, `/bank/register`, `/bank/login`, `/mfa/verify`, `/refresh`, `/logout`, `GET /me` | Varies |
+| `/loans` | CRUD, drafts, document upload/delete, status transitions, history, chat | SME / Bank Admin |
+| `/banks` | Bank account linking (OTP-verified), account management | SME |
+| `/bank-policies` | Policy CRUD, policy PDF extraction trigger | Bank Admin |
+| `/ocr` | File upload, job status, retry, stats, mark-vectorized (internal) | Auth / Internal |
+| `/extraction` | Trigger extraction, re-extract, results, status callback, missing-info callback | Bank Admin / Internal |
+| `/underwriting` | AI assessment, report, re-evaluate, policy inventory, audit logs, queue status | Bank Admin |
+| `/notifications` | `GET /`, `GET /unread-count`, `PATCH /read-all`, `PATCH /:id/read`, `GET /sse`, `GET /metrics` | Private |
 | `/audit-logs` | `GET /` | Bank Admin / Super Admin |
 
 #### 4.2.4 RBAC (Role-Based Access Control)
-
-Defined in [auth middleware](file:///e:/Desktop/Web%20Development/CapitalScale/backend/src/middleware/auth.js):
 
 | Role | Identifier | Access Level |
 |---|---|---|
 | SME Applicant | `sme` | Loan applications, document upload, own dashboard |
 | Bank Administrator | `bank_admin` | Loan review, AI assessment, policy management, audit logs |
-| Super Administrator | `super_admin` | Full system access |
+| Super Administrator | `super_admin` | Full system access including metrics |
 
-**Convenience middleware combos:**
-- `requireSME` = `protect` + `authorizeRoles('sme')`
-- `requireBankAdmin` = `protect` + `authorizeRoles('bank_admin')`
-- `requireBankOrSuper` = `protect` + `authorizeRoles('bank_admin', 'super_admin')`
-- `requireAuth` = `protect` only (any authenticated user)
+**Middleware guards:**
+- `requireSME` = `[protect, authorizeRoles('sme')]`
+- `requireBankAdmin` = `[protect, authorizeRoles('bank_admin')]`
+- `requireBankOrSuper` = `[protect, authorizeRoles('bank_admin', 'super_admin')]`
+- `requireInternalSecret` = validates `x-internal-secret` header (AI service → backend callbacks)
 
-The system also supports **permission-based authorization** (`authorizePermissions`) via role-permission mappings stored in the database and cached in Redis sessions.
+#### 4.2.5 Notification System (Event-Driven Architecture)
 
-#### 4.2.5 Controller → Service → Repository Pattern
-
-The backend follows a strict **layered architecture**:
-
+**RabbitMQ Topology:**
 ```
-Controller (thin HTTP handler)
-    └── Service (business logic)
-        └── Repository / DB Queries (data access)
-            └── Supabase Client (PostgreSQL)
+Exchange: capitalscale.notifications (topic, durable)
+├── Binding: otp.#  → otp_queue   (x-max-priority: 10, DLX-bound)
+└── Binding: loan.# → notification_queue (x-max-priority: 5, DLX-bound)
+
+Exchange: capitalscale.dlx (direct, durable)
+└── Binding: dlq → dead_letter_queue
 ```
 
-**Controllers** ([controllers/](file:///e:/Desktop/Web%20Development/CapitalScale/backend/src/controllers)):
-- Parse request parameters
-- Delegate to services
-- Format responses using `ApiResponse` utility
-- Record audit logs (fire-and-forget with `.catch(() => {})`)
+**Email Worker Flow (notification_queue):**
+1. Parse message JSON (`correlationId`, `eventType`, `payload`, `retryCount`)
+2. Track job state in `email_jobs` DB table
+3. If `loan.status.*` event → create in-app notification (for applicable statuses)
+4. If `loan.missing_info.completed` → create admin in-app notification
+5. Check if email needed (`SME_EMAIL_STATUSES`: `missing_info`, `approved`, `rejected`)
+6. Acquire Redis sliding-window email rate limit slot
+7. Render HTML template, send via nodemailer
+8. On failure: retry up to 10 times (2s sleep between), then `nack` to DLQ
 
-**Services** ([services/](file:///e:/Desktop/Web%20Development/CapitalScale/backend/src/services)):
-- Contain all business logic
-- Orchestrate between multiple repositories and external services
-- Handle authorization checks
-- Communicate with AI Services via HTTP (Axios)
+**In-App Notification Flow:**
+1. `createAndDeliverInAppNotification()` — INSERT into `notifications` table
+2. `publishSSEEvent(userId, data)` — publishes to Redis `sse:user:<userId>` channel
+3. Redis subscriber on all instances receives message → `_pushToLocalConnections()` → HTTP response write
 
-**Database Queries** ([db/queries/](file:///e:/Desktop/Web%20Development/CapitalScale/backend/src/db/queries)):
-- Raw Supabase queries organized by entity
-- 8 query modules: `users`, `loans`, `ocrJobs`, `policies`, `bankAccounts`, `embeddings`, `otps`, `auditLogs`
+**Email Rate Limiting (`rateLimiter.service.js`):**
+- Sliding window using Redis `INCR` + `EXPIRE` per minute epoch
+- `OTP_RATE_RESERVE` (default 10) slots reserved for OTP bucket
+- General emails use remaining: `EMAIL_RATE_LIMIT_PER_MINUTE - OTP_RATE_RESERVE`
+
+#### 4.2.6 Database Query Modules (9 total)
+
+| Module | Purpose |
+|---|---|
+| `users.queries.js` | SME/Bank user CRUD, role lookup, permission queries, registered banks |
+| `loans.queries.js` | Loan CRUD, draft management, status history, missing info |
+| `ocrJobs.queries.js` | OCR job tracking, vectorization status |
+| `policies.queries.js` | Bank policy document CRUD |
+| `bankAccounts.queries.js` | SME-linked bank accounts (OTP-verified linking) |
+| `embeddings.queries.js` | Document chunk deletion (by source document) |
+| `otps.queries.js` | OTP CRUD — store HMAC hash, increment attempts, delete |
+| `auditLogs.queries.js` | Audit event recording |
+| `notifications.queries.js` | Notification CRUD, unread count, mark as read |
 
 ---
 
 ### 4.3 AI Services (Python FastAPI)
 
-This is the **AI/ML brain** of the platform, defined in [main.py](file:///e:/Desktop/Web%20Development/CapitalScale/ai-services-python/main.py).
-
 #### 4.3.1 Startup Lifecycle
 
 ```mermaid
 graph TD
-    A[Initialize asyncpg Pool] --> B[Create DB Tables & Indexes]
-    B --> C[Verify Gemini API Connectivity]
-    C --> D[Start OCR Worker Queue]
-    D --> E[Start Processing Queue Worker]
-    E --> F["✅ AI Service Ready"]
+    A[init_db — asyncpg pool + pgvector setup] --> B[Create DB tables & HNSW/GIN indexes]
+    B --> C[ping_llm — Verify Gemini API]
+    C --> D[start_worker — OCR background queue]
+    D --> E[processing_queue.start — Priority job queue]
+    E --> F[AI Service Ready ✅]
 ```
 
-On startup, the service:
-1. Creates an **asyncpg connection pool** (min 5, max 20 connections) — [database.py](file:///e:/Desktop/Web%20Development/CapitalScale/ai-services-python/config/database.py)
-2. Ensures **pgvector extension** is installed
-3. Creates all required tables (if missing): `loan_processing_jobs`, `query_embedding_cache`, `policy_rules`, `policy_extraction_audit`, `underwriting_audit_logs`, `rule_relationships`
-4. Creates **RAG indexes** on `document_embeddings` (HNSW for vectors, GIN for trigrams, btree for lookups)
-5. **Pings Gemini API** to verify connectivity
-6. **Starts the OCR background worker** for processing document scans
-7. **Starts the Processing Queue** for extraction + underwriting jobs
-
-#### 4.3.2 OCR Pipeline
-
-The OCR pipeline processes uploaded documents through [ocr_queue.py](file:///e:/Desktop/Web%20Development/CapitalScale/ai-services-python/services/ocr/ocr_queue.py):
+#### 4.3.2 OCR Pipeline (`services/ocr/`)
 
 ```mermaid
 sequenceDiagram
-    participant Backend
-    participant OCR Router
-    participant OCR Queue
-    participant PaddleOCR
-    participant pgvector
-    participant Backend Callback
-
-    Backend->>OCR Router: POST /api/v1/ocr/process (file + metadata)
-    OCR Router->>OCR Queue: submit_job(OcrQueueItem)
-    OCR Queue->>OCR Queue: Enqueue (max 50 items)
-    
-    Note over OCR Queue: Background Worker Loop
-    OCR Queue->>PaddleOCR: Process file (paddle_ocr.py)
-    PaddleOCR->>PaddleOCR: PDF → Images → Text + Tables
-    PaddleOCR-->>OCR Queue: Extracted text + page data
-    OCR Queue->>OCR Queue: Chunk text (semantic chunking)
-    OCR Queue->>pgvector: Generate embeddings + store chunks
-    OCR Queue->>Backend Callback: POST /ocr/jobs/:id/vectorized
+    Backend->>OCR Router: POST /api/v1/ocr/process (file + job_id + metadata)
+    OCR Router->>OCR Queue: enqueue(OcrQueueItem)
+    Note over OCR Queue: Background worker loop
+    OCR Queue->>document_loader: process_document(bytes, filename, mime)
+    document_loader->>document_loader: Route by MIME type
+    alt Native PDF
+        document_loader->>PdfPlumber: extract text + tables (asyncio.to_thread)
+        PdfPlumber->>PdfPlumber: Check avg_chars_per_page ≥ 50
+    else Scanned PDF / Image
+        document_loader->>PaddleOCR: Vision-based OCR
+    end
+    document_loader-->>OCR Queue: DocumentResult (raw_text, page_results, confidence)
+    OCR Queue->>ChunkingFactory: build_document_chunks(result, metadata)
+    ChunkingFactory->>pgvector: store chunks + 768-dim embeddings
+    OCR Queue->>Backend: PATCH /ocr/jobs/:id/vectorized (x-internal-secret header)
 ```
 
-**Key OCR features:**
-- **PaddleOCR v4** for text recognition (supports multi-language)
-- **PDF to image conversion** at 200 DPI
-- **Image enhancement** (optional)
-- **Table extraction** support
-- **Queue-based processing** with max 50 concurrent items
-- **Automatic vectorization** — text chunks are embedded and stored in pgvector
-- **Callback mechanism** — notifies backend on completion
+**Key features:**
+- `avg_chars_per_page < 50` threshold detects scanned vs native PDFs
+- Tables extracted by pdfplumber become Markdown (`| Header | Cell |`)
+- `asyncio.to_thread()` prevents pdfplumber blocking the async event loop
+- Callback protected by `requireInternalSecret` middleware (fixes security vulnerability)
 
-#### 4.3.3 Parameter Extraction Pipeline
+#### 4.3.3 Domain-Aware Chunking (`services/rag/chunking/`)
 
-The extraction service ([extraction_service.py](file:///e:/Desktop/Web%20Development/CapitalScale/ai-services-python/services/extraction/extraction_service.py), ~26KB) extracts structured financial parameters from loan documents:
+| Document Type | Strategy | Max Tokens | Overlap | Key Logic |
+|---|---|---|---|---|
+| Bank Policy | `BankPolicySemanticStrategy` | 800 | 0 | Exception/Note gluing; chapter hierarchy |
+| Bank Statement | `BankStatementStrategy` | 550 | 80 | Table row grouping (`\|`, `\t`, double-space) |
+| Tax Return / ITR | `TaxReturnStrategy` | 600 | 80 | Financial table preservation |
+| Financial Statement | `FinancialTableStrategy` | 600 | 80 | P&L / Balance sheet row protection |
+| Pay Stub | `PayStubStrategy` | 450 | 60 | Dense numerical chunk sizing |
+| Appraisal / Valuation | `AppraisalStrategy` | 800 | 120 | Narrative + table mix |
+| Identity Document | `IdentityImageStrategy` | 350 | 40 | Small target for high signal density |
+| General / Unknown | `NarrativeDocumentStrategy` | 750 | 100 | Paragraph-based splitting |
 
-**Extraction workflow:**
-1. **Retrieval**: Queries pgvector for relevant document chunks using semantic search
-2. **First Pass**: LLM (Gemini 1.5 Pro) extracts ~30+ parameters from retrieved context
-3. **Verification Agent** (optional): A second LLM pass to verify extracted values against source documents
-4. **Second Pass** (optional): Targeted re-extraction for any parameters with low confidence
-5. **Result Storage**: Saves structured extraction results to `extracted_parameters` table
+**`StructuredFactExtractor`** — Injects extracted entities (names, amounts, dates, IDs) directly into chunk `metadata` JSONB for deterministic exact-match retrieval fallback.
 
-**Extracted parameters include:**
-- GSTIN, PAN, business registration details
-- Annual turnover, net profit, operating profit margins
-- DSCR (Debt Service Coverage Ratio)
-- Collateral details
-- Business vintage
-- Credit score indicators
-- And many more financial metrics
+**Orphan merging** — Chunks < 40 tokens (`CARRY_FORWARD_MAX_TOKENS`) are carried into the next group, preventing isolated noise chunks.
 
-**Advanced features:**
-- **Two-stage retrieval**: Candidate retrieval (top 40) → Cross-encoder reranking (top 10)
-- **Confidence scoring** per parameter
-- **Missing field detection** with callback to backend
-- **Caching** to avoid redundant extractions
-- **Configurable context window** (max 24,000 chars)
+#### 4.3.4 Parameter Extraction (`services/extraction/`)
 
-#### 4.3.4 AI Underwriting Assessment
+Extracts 30+ financial parameters from loan documents using multi-stage LLM reasoning:
 
-The underwriting engine ([underwriting_service.py](file:///e:/Desktop/Web%20Development/CapitalScale/ai-services-python/services/underwriting/underwriting_service.py), ~18KB) evaluates loan applications against bank-specific policies:
+1. **Query cache warm-up** — Pre-embeds 6 underwriting question categories (annual_revenue, gst_turnover, business_age, cash_flow, existing_loans, policy_compliance)
+2. **Batch retrieval** — Fetches evidence for each question using cached embeddings + `query_similar_chunks()`
+3. **Context merging** — Contiguous chunks from same page/doc merged to reduce LLM context fragmentation
+4. **First pass LLM extraction** — Gemini 1.5 Pro extracts parameters with confidence scores
+5. **Verification agent** (optional) — Second LLM pass cross-checks extracted values against source
+6. **Missing field detection** — Callback to backend marks loan as `missing_info` when required fields are absent
 
-**Assessment workflow:**
-1. **Load extracted parameters** from the extraction pipeline
-2. **Retrieve active policy rules** for the applicant's bank from `policy_rules` table
-3. **Construct evaluation prompt** with parameters + rules
-4. **LLM evaluates** each rule against extracted data
-5. **Generate risk score** (0-100) and decision (Approve/Reject/Refer)
-6. **Store assessment** + **audit log** to database
+#### 4.3.5 AI Underwriting Assessment (`services/underwriting/`)
 
-**Output includes:**
-- Overall risk score
-- Decision recommendation (Approve / Reject / Refer to committee)
-- Confidence level
-- Per-rule evaluation results (pass/fail/inconclusive with reasoning)
-- Missing data flags
+1. Load extracted parameters from `extracted_parameters` table
+2. Retrieve active `policy_rules` for the applicant's bank
+3. Construct structured evaluation prompt (parameters + rules)
+4. Gemini evaluates each rule → per-rule pass/fail/inconclusive + reasoning
+5. Generate overall risk score (0–100) and decision (Approve / Reject / Refer)
+6. Store assessment + audit log
 
-#### 4.3.5 Policy Management Engine
+#### 4.3.6 RAG Chat (`routers/chat.py`)
 
-The policy service ([policy_service.py](file:///e:/Desktop/Web%20Development/CapitalScale/ai-services-python/services/underwriting/policy_service.py), ~21KB) handles bank-specific underwriting policy rules:
+Two chat interfaces, both strictly grounded (refuses to answer outside provided context):
 
-- **Policy PDF Processing**: Bank admins upload policy PDFs → OCR → Text extraction → Chunked + embedded
-- **Rule Extraction**: LLM reads policy chunks and extracts discrete underwriting rules
-- **Rule Storage**: Rules stored in `policy_rules` table with metadata (category, priority, section, page)
-- **Rule Relationships**: Parent-child, dependency, and exception relationships between rules (`rule_relationships` table)
-- **Audit Trail**: Every extraction logged in `policy_extraction_audit`
+| Chat Type | Endpoint | Retrieval Strategy |
+|---|---|---|
+| Loan Document Chat | `/api/v1/chat/loan/{application_id}` | Cosine similarity on loan's embedded chunks |
+| Policy Chat | `/api/v1/chat/policy/{bank_id}` | Two-stage: vector search (top-40) → CrossEncoder rerank (top-10) |
 
-#### 4.3.6 RAG Chat System
+Both return structured JSON: `{ answer, reasoning, found_in_context, sources }`.
 
-The chat engine ([chat.py](file:///e:/Desktop/Web%20Development/CapitalScale/ai-services-python/routers/chat.py)) provides two conversational interfaces:
+#### 4.3.7 CrossEncoder Re-Ranking (`services/vectordb/reranker.py`)
 
-**1. Loan Document Chat** (`/api/v1/chat/loan/{application_id}`)
-- Bank admins ask questions about a specific loan's documents
-- Uses semantic search against the loan's embedded document chunks
-- Strictly grounded — AI only answers from provided context
+- Model: `cross-encoder/ms-marco-MiniLM-L-6-v2` (via `sentence-transformers`)
+- Lazy-loaded on first use — `asyncio.Lock()` prevents double-initialization
+- `CrossEncoder.predict()` runs in `asyncio.to_thread()` — never blocks the event loop
+- Disabled gracefully if model fails to load (`is_enabled = False` fallback)
 
-**2. Policy Chat** (`/api/v1/chat/policy/{bank_id}`)
-- Bank admins ask questions about their credit underwriting policies
-- Uses **retrieve-and-rerank** pipeline (cross-encoder reranking)
-- Includes detailed few-shot prompting for strict grounding
-
-**Chat features:**
-- **Structured JSON output** with `answer`, `reasoning`, and `found_in_context` flag
-- **Source attribution** — returns document names and page numbers
-- **Rate limit handling** with retry-after headers
-- **Retrieval metric logging** for monitoring and evaluation
-
-#### 4.3.7 Processing Queue (Job Scheduler)
-
-The [processing_queue.py](file:///e:/Desktop/Web%20Development/CapitalScale/ai-services-python/services/processing_queue.py) is a **single-threaded, priority-based job queue** for long-running AI tasks:
+#### 4.3.8 Processing Queue (`services/processing_queue.py`)
 
 | Feature | Detail |
 |---|---|
-| **Sequential processing** | One job at a time to respect LLM rate limits |
-| **Priority ordering** | Higher priority jobs execute first |
-| **Job types** | `extraction`, `underwriting`, `full_pipeline` |
-| **Preemption** | Admin can cancel current job and promote their own |
-| **Status tracking** | `pending` → `running` → `completed` / `failed` / `paused` |
-| **Error handling** | Failed jobs recorded with error message |
-| **Persistence** | Jobs stored in `loan_processing_jobs` PostgreSQL table |
+| **Execution** | Sequential (one job at a time) — respects LLM rate limits |
+| **Priority** | Higher-priority jobs execute first |
+| **Job types** | `extraction`, `underwriting`, `full_pipeline` (chains both) |
+| **Status tracking** | `pending` → `running` → `completed` / `failed` |
+| **Persistence** | `loan_processing_jobs` PostgreSQL table |
+| **Skip exemption** | `/queue/status` exempt from rate limiter + request logger |
 
-The `full_pipeline` job type chains extraction → underwriting automatically.
+#### 4.3.9 LLM Facade & Rate Limiting (`services/llm/`)
 
-#### 4.3.8 LLM Facade & Rate Limiting
+- **Unified interface** — `llm_facade.py` exposes `chat()`, `embed()`, `ping()` — all callers share one rate limiter
+- **Providers**: `gemini.py` (primary — Gemini 1.5 Pro + 2.5 Flash + text-embedding-004), `openai.py` (fallback — GPT-4o-mini)
+- **Rate limiter**: Async token-bucket managing free-tier quota (~15 req/min for Gemini)
+- **Embedding cache**: `query_embedding_cache` PostgreSQL table prevents redundant API calls for standard underwriting questions
 
-The [llm_facade.py](file:///e:/Desktop/Web%20Development/CapitalScale/ai-services-python/services/llm/llm_facade.py) provides a unified interface with **centralized rate limiting**:
+#### 4.3.10 Vector Database (`services/vectordb/pgvector_service.py`)
 
-- **Single shared rate limiter** for all LLM calls (OCR embedding, extraction, underwriting, chat)
-- **Provider abstraction** via [providers/](file:///e:/Desktop/Web%20Development/CapitalScale/ai-services-python/services/llm/providers):
-  - [gemini.py](file:///e:/Desktop/Web%20Development/CapitalScale/ai-services-python/services/llm/providers/gemini.py) — Primary provider (Gemini 1.5 Pro + 2.5 Flash)
-  - [openai.py](file:///e:/Desktop/Web%20Development/CapitalScale/ai-services-python/services/llm/providers/openai.py) — Fallback (GPT-4o-mini)
-  - [base.py](file:///e:/Desktop/Web%20Development/CapitalScale/ai-services-python/services/llm/providers/base.py) — Abstract base class
-
-**Rate limiter** ([rate_limiter.py](file:///e:/Desktop/Web%20Development/CapitalScale/ai-services-python/services/llm/rate_limiter.py)):
-- Manages Gemini free tier quota (~15 req/min)
-- Async token-bucket algorithm
-- Health check pings are exempt
-
-#### 4.3.9 Vector Database (pgvector)
-
-The [pgvector_service.py](file:///e:/Desktop/Web%20Development/CapitalScale/ai-services-python/services/vectordb/pgvector_service.py) manages vector storage and retrieval:
-
-| Function | Description |
-|---|---|
-| `store_chunks()` | Batch-insert text chunks with 768-dim embeddings |
-| `query_similar_chunks()` | Cosine similarity search filtered by application_id |
-| `retrieve_and_rerank()` | Two-stage: vector search → cross-encoder reranking |
-| `get_embedding_stats()` | Aggregate statistics for health checks |
-
-**Indexes maintained** (from [database.py](file:///e:/Desktop/Web%20Development/CapitalScale/ai-services-python/config/database.py)):
-- `idx_doc_emb_application_id` (btree)
-- `idx_doc_emb_app_doctype` (composite btree)
-- `idx_doc_emb_source_document` (btree)
-- `idx_doc_emb_vector_hnsw` (HNSW with m=16, ef_construction=64)
-- `idx_doc_emb_chunk_text_trgm` (GIN trigram for text search)
-- `idx_doc_emb_structured_facts` (GIN on JSONB metadata)
+Indexes maintained on `document_embeddings`:
+- `idx_doc_emb_application_id` (btree) — tenant isolation
+- `idx_doc_emb_app_doctype` (composite btree) — document type filtering
+- `idx_doc_emb_vector_hnsw` (HNSW, m=16, ef_construction=64) — approximate nearest neighbor
+- `idx_doc_emb_chunk_text_trgm` (GIN trigram) — keyword fallback search
+- `idx_doc_emb_structured_facts` (GIN JSONB) — structured fact exact-match queries
 
 ---
 
 ## 5. Database Schema
 
-The platform uses **PostgreSQL via Supabase** with the following key tables:
-
-### Core Tables (Managed by Backend / Supabase)
+### Core Tables (PostgreSQL via Supabase)
 
 | Table | Purpose |
 |---|---|
-| `sme_users` | SME applicant accounts |
+| `sme_users` | SME applicant accounts (Argon2 hashed passwords) |
 | `bank_admin_users` | Bank administrator accounts |
-| `roles` | RBAC role definitions |
+| `roles` | RBAC role definitions (`sme_applicant`, `bank_underwriter`, `super_admin`) |
 | `role_permissions` | Permission mappings per role |
-| `loans` | Loan applications with status, documents, AI results |
+| `permissions` | Granular permission definitions |
+| `loans` | Loan applications — status, documents, AI results, progress |
+| `loan_status_history` | Full state transition log with actor and timestamp |
 | `bank_accounts` | SME-linked bank accounts (OTP-verified) |
 | `bank_policy_documents` | Uploaded bank policy PDF metadata |
-| `otps` | MFA verification codes (email OTP) |
-| `audit_logs` | Full platform audit trail |
+| `otps` | MFA OTP records — stores HMAC-SHA256 hash, attempts counter, expiry |
+| `audit_logs` | Platform audit trail (actor, action, IP, user agent, status) |
 | `ocr_jobs` | OCR processing job tracking |
+| `notifications` | In-app notification records (user_id, type, title, message, is_read) |
+| `email_jobs` | Email delivery tracking (correlationId, status, retry_count, error_message) |
 
 ### AI Tables (Managed by Python Service)
 
 | Table | Purpose |
 |---|---|
-| `document_embeddings` | Vectorized document chunks (pgvector) |
+| `document_embeddings` | Vectorized document chunks (pgvector, 768-dim) + metadata JSONB |
 | `extracted_parameters` | AI-extracted financial parameters per loan |
 | `loan_processing_jobs` | Processing queue state (extraction/underwriting jobs) |
-| `query_embedding_cache` | Cached query embeddings to avoid redundant API calls |
+| `query_embedding_cache` | Cached query embeddings for underwriting questions |
 | `policy_rules` | Extracted underwriting rules per bank |
 | `policy_extraction_audit` | Audit trail for policy rule extraction |
 | `underwriting_audit_logs` | Detailed AI assessment audit records |
@@ -529,32 +501,26 @@ The platform uses **PostgreSQL via Supabase** with the following key tables:
 ```mermaid
 stateDiagram-v2
     [*] --> draft: SME creates draft
-    draft --> pending_review: SME submits application
-    pending_review --> under_review: Bank admin picks up
-    under_review --> ai_extraction: Bank triggers AI extraction
-    ai_extraction --> ai_underwriting: Auto-triggered on extraction complete
-    ai_underwriting --> under_review: Assessment ready
-    under_review --> approved: Bank approves
-    under_review --> rejected: Bank rejects
-    under_review --> info_requested: Bank requests more info
-    info_requested --> pending_review: SME resubmits
-    under_review --> policy_issue: Policy violation found
-    policy_issue --> under_review: Issue resolved
+    draft --> submitted: SME submits (RabbitMQ → loan.status.submitted notification)
+    submitted --> eligibility_check: Bank admin picks up
+    eligibility_check --> agent_review: Eligibility passed
+    eligibility_check --> missing_info: Documents needed (email + in-app notification)
+    missing_info --> submitted: SME resubmits (admin in-app notification)
+    agent_review --> approved: Bank approves (email + in-app)
+    agent_review --> rejected: Bank rejects (email + in-app)
+    agent_review --> missing_info: More info needed
+    approved --> disbursed: Loan disbursed (in-app notification)
 ```
 
-### Step-by-step:
-
-1. **SME Registration** → Creates account with MFA verification
-2. **Create Loan Draft** → SME selects a partner bank, creates draft application
-3. **Fill Application** → SME enters business details, financials
-4. **Upload Documents** → PDFs/images uploaded to Cloudinary, OCR queued automatically
-5. **Submit Application** → Status transitions to `pending_review`
-6. **Bank Admin Review** → Bank admin sees application in dashboard
-7. **AI Extraction** → Bank admin triggers extraction → Queue job runs → Parameters extracted
-8. **AI Underwriting** → Auto-triggered after extraction → Risk score + decision generated
-9. **Review Assessment** → Bank admin reviews AI report, asks questions via chat
-10. **Decision** → Bank admin approves, rejects, or requests more information
-11. **Audit Trail** → Every action recorded with actor, timestamp, IP, user agent
+**Step-by-step:**
+1. SME registers → MFA OTP via RabbitMQ email
+2. Creates loan draft → selects partner bank
+3. Uploads documents → Cloudinary storage → OCR queued → vectorized
+4. Submits application → RabbitMQ publishes `loan.status.submitted`
+5. Bank admin reviews → triggers AI extraction (processing queue job)
+6. AI parameters extracted → underwriting auto-triggered → risk score generated
+7. Bank admin reviews AI report → uses RAG chat for document questions
+8. Bank decision → `loan.status.approved/rejected` published → email + in-app notification via SSE
 
 ---
 
@@ -562,16 +528,20 @@ stateDiagram-v2
 
 | Layer | Mechanism |
 |---|---|
-| **Password Storage** | Argon2id (memory-hard hash) |
-| **Authentication** | JWT (access + refresh) with MFA (email OTP) |
-| **Session Management** | Redis-backed sessions with token rotation |
-| **Token Security** | Refresh token blacklisting + reuse detection |
-| **API Security** | Helmet headers, CORS whitelist, rate limiting |
-| **Input Validation** | Zod schemas (backend), Pydantic models (AI services) |
-| **File Uploads** | Multer with size limits, MIME type validation |
-| **RBAC** | Role-based + permission-based access control |
-| **Audit Logging** | Every action logged with IP, user agent, actor |
-| **Cookie Security** | httpOnly, secure, sameSite for refresh tokens |
+| **Password Hashing** | Argon2id (memory-hard) |
+| **MFA** | Email OTP (HMAC-SHA256 stored), 5m expiry, 3-attempt lockout |
+| **OTP Race Condition** | Redis distributed lock (`SET NX EX`) prevents concurrent brute-force |
+| **JWT Architecture** | 3 separate secrets + audience claims (`access`, `refresh`, `mfa`) |
+| **Token Rotation** | Refresh tokens single-use; old JTI blacklisted immediately |
+| **Reuse Detection** | Blacklisted token reuse logs `security.token_reuse_fraud` audit event |
+| **Redis Fail-safe** | `isTokenBlacklisted()` returns `true` (deny) when Redis is unavailable |
+| **Session Management** | Redis-backed with 30-day TTL; instant revocation on logout |
+| **SSE Auth** | Token passed as query param (EventSource limitation); `protect` middleware validates |
+| **Internal Callbacks** | `x-internal-secret` header guards all AI→backend webhook endpoints |
+| **API Security** | Helmet, CORS origin whitelist, rate limiting |
+| **Input Validation** | Zod (backend), Pydantic (AI services) |
+| **Cookie Security** | httpOnly, secure, sameSite, path-scoped to `/api/v1/auth` |
+| **Audit Logging** | Every significant action logged with IP, user agent, actor, timestamp |
 
 ---
 
@@ -579,25 +549,26 @@ stateDiagram-v2
 
 ### Docker Compose (Development)
 
-Defined in [docker-compose.yml](file:///e:/Desktop/Web%20Development/CapitalScale/docker-compose.yml):
-
 | Service | Container | Port | Notes |
 |---|---|---|---|
-| Redis | `ai_loan_redis` | 6379 | Session store & token blacklist |
-| Backend | `ai_loan_backend` | 5000 | Node.js + Express |
-| AI Services | `ai_loan_ai_services` | 5001 | Python + FastAPI + PaddleOCR |
+| Redis | `ai_loan_redis` | 6379 | Session store, token blacklist, SSE Pub/Sub, email rate limit |
+| Backend | `ai_loan_backend` | 5000 | Node.js Express + all notification workers |
+| AI Services | `ai_loan_ai_services` | 5001 | Python FastAPI + PaddleOCR model cache volume |
 | Frontend | `ai_loan_frontend` | 3000 | Vite dev server |
+
+**Note:** RabbitMQ container is commented out in `docker-compose.yml` — production uses CloudAMQP externally via `RABBITMQ_URL` env var.
 
 ### Production
 
 | Service | Platform |
 |---|---|
-| Frontend | **Vercel** (capitalscale.vercel.app) |
-| Backend | **Render.com** or similar |
-| AI Services | **Render.com** (Docker-based) — [render.yaml](file:///e:/Desktop/Web%20Development/CapitalScale/render.yaml) |
+| Frontend | **Vercel** |
+| Backend | **Render.com** (Docker-based, `render.yaml`) |
+| AI Services | **Render.com** (Docker-based, PaddleOCR model cache volume) |
 | Database | **Supabase** (managed PostgreSQL + pgvector) |
 | File Storage | **Cloudinary** |
 | Redis | Managed Redis provider |
+| RabbitMQ | **CloudAMQP** (managed) |
 
 ---
 
@@ -606,20 +577,23 @@ Defined in [docker-compose.yml](file:///e:/Desktop/Web%20Development/CapitalScal
 | Metric | Value |
 |---|---|
 | **Total tiers** | 3 (Frontend, Backend, AI Services) |
-| **Backend controllers** | 8 |
+| **Backend controllers** | 9 (including NotificationController) |
 | **Backend services** | 7 |
-| **Backend middleware** | 6 |
-| **Backend DB query modules** | 8 |
-| **Backend API route groups** | 9 |
-| **AI service routers** | 6 |
-| **AI service modules** | 7+ (OCR, Extraction, Underwriting, RAG, Vector DB, LLM, Queue) |
+| **Backend middleware** | 6 (including `requireInternalSecret`) |
+| **Backend DB query modules** | 9 (including notifications.queries.js) |
+| **Backend route groups** | 10 |
+| **Notification workers** | 3 (OTP Worker, Email Worker, DLQ Processor) |
+| **Email templates** | 5 (OTP, loanApproved, loanRejected, missingInfo, missingInfoCompleted) |
+| **Notification event types** | 10 (defined in NOTIFICATION_EVENTS) |
+| **AI service routers** | 6 (OCR, extraction, underwriting, chat, embed, queue) |
+| **AI service modules** | 8+ (OCR, RAG chunking, retrieval, extraction, underwriting, vectordb, LLM, processing queue) |
+| **Chunking strategies** | 8 (BankPolicy, BankStatement, TaxReturn, PayStub, Appraisal, Financial, Identity, Narrative) |
 | **Frontend pages** | 10 |
-| **Frontend API modules** | 7 |
+| **Frontend API modules** | 8 (including notification.api.js) |
+| **Frontend hooks** | 4 (useIdleTimeout, useNotifications, useApi, useRequireAuth) |
 | **LLM providers** | 2 (Gemini primary, OpenAI fallback) |
-| **Database tables** | ~18 |
-| **Docker services** | 4 |
-| **Largest frontend file** | BankAdminDashboard.jsx (154KB) |
-| **Largest AI service file** | extraction_service.py (26.6KB) |
+| **Database tables** | ~22 |
+| **Docker services** | 4 (RabbitMQ external via CloudAMQP) |
 
 ---
 
@@ -627,16 +601,20 @@ Defined in [docker-compose.yml](file:///e:/Desktop/Web%20Development/CapitalScal
 
 | Decision | Rationale |
 |---|---|
-| **Monorepo with npm workspaces** | Single repo for frontend, backend, AI — simpler CI/CD |
-| **Supabase over raw Postgres** | Managed auth, realtime, built-in RLS; faster to ship |
-| **asyncpg over SQLAlchemy** | Raw async driver = lower overhead for high-throughput AI workloads |
-| **Sequential processing queue** | Prevents LLM rate limit exhaustion; ensures deterministic execution |
-| **Cross-encoder reranking** | Dramatically improves RAG retrieval quality for policy chat |
+| **RabbitMQ over direct SMTP in service** | Decouples email delivery from request path; OTP queue gets priority 10 ensuring instant delivery even under load |
+| **SSE + Redis Pub/Sub over WebSockets** | SSE is unidirectional (sufficient for notifications); stateless HTTP avoids sticky session complexity; Redis Pub/Sub enables horizontal scaling |
+| **3 JWT secrets with audience claims** | Prevents cross-token attacks; an MFA token cannot be used as an Access token even if stolen |
+| **Redis fail-safe deny on blacklist check** | Security > Availability; a Redis outage cannot be exploited to replay revoked tokens |
+| **OTP as HMAC-SHA256 hash** | DB read access cannot recover OTP codes; timing-safe comparison prevents timing attacks |
+| **Redis distributed OTP lock** | Prevents concurrent MFA verification race conditions that could bypass 3-attempt lockout |
+| **Domain-specific chunking strategies** | Generic splitters destroy financial tables; custom strategies are cheaper and more accurate than LLM-based semantic chunking |
+| **CrossEncoder reranking** | Vector similarity finds "related" chunks; CrossEncoder finds "contextually relevant" chunks for precise underwriting |
+| **Query embedding cache** | 6 standard underwriting questions are pre-embedded once — saves LLM API calls on every assessment |
+| **Sequential processing queue** | Prevents LLM rate limit exhaustion; deterministic execution order |
+| **asyncio.to_thread() for blocking ops** | pdfplumber and CrossEncoder are sync/CPU-bound; running them in worker threads keeps FastAPI event loop free |
+| **`x-internal-secret` for callbacks** | Fixes security gap where AI→backend webhook endpoints were publicly accessible |
 | **Fire-and-forget audit logs** | `.catch(() => {})` ensures audit failures never block user operations |
-| **Centralized rate limiter** | Single throttle point for all LLM calls prevents quota exhaustion |
-| **Zustand over Redux** | Minimal boilerplate for auth state; persisted to localStorage |
-| **Argon2 over bcrypt** | Memory-hard = resistant to GPU/ASIC brute-force attacks |
-| **Structured JSON LLM output** | Forces model to return parseable JSON with `found_in_context` flag for grounding |
+| **Monorepo with npm workspaces** | Single repo for all three tiers; simpler CI/CD and dependency management |
 
 ---
 
@@ -644,9 +622,10 @@ Defined in [docker-compose.yml](file:///e:/Desktop/Web%20Development/CapitalScal
 
 CapitalScale is a **sophisticated, production-ready platform** that digitizes and automates the SME loan underwriting process. It combines:
 
-- **Modern web technologies** (React, Express, FastAPI) for a responsive user experience
-- **AI/ML capabilities** (PaddleOCR, Gemini LLM, pgvector RAG) for intelligent document processing
-- **Enterprise-grade security** (MFA, JWT rotation, RBAC, audit logging) for regulatory compliance
-- **Scalable architecture** (Docker, managed cloud services, async processing queues) for production workloads
+- **Modern web technologies** (React 18, Express.js, FastAPI) for responsive UX
+- **AI/ML capabilities** (PaddleOCR, Gemini LLM, pgvector, CrossEncoder RAG) for intelligent document processing
+- **Enterprise-grade security** (Argon2, 3-secret JWT, Redis blacklisting, OTP hashing, audit logging)
+- **Event-driven architecture** (RabbitMQ, SSE, Redis Pub/Sub) for resilient async communication
+- **Scalable infrastructure** (Docker, Supabase, CloudAMQP, Render) for production workloads
 
-The three-tier design cleanly separates concerns: the frontend handles user interaction, the backend manages business logic and authorization, and the AI service focuses purely on ML workloads — making each tier independently scalable and maintainable.
+The three-tier design cleanly separates concerns: the frontend handles UX and real-time state, the backend manages business logic and event orchestration, and the AI service focuses purely on ML workloads — making each tier independently scalable and maintainable.

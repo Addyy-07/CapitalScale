@@ -58,8 +58,8 @@ A separate **`role_permissions`** junction table and **`permissions`** table ena
    - Looks up the `sme_applicant` role from the `roles` table
    - Hashes password with **Argon2**: `argon2.hash(password)`
    - Creates the user in `sme_users` table
-   - Generates a 6-digit OTP, stores it in the `otp_codes` table (expires in 5 min)
-   - Generates a short-lived **MFA temp token** (JWT, 5 min expiry)
+   - Generates a 6-digit OTP, hashes it with HMAC-SHA256, and stores the hash in the `otps` table (expires in 5 min). Plaintext is never stored.
+   - Generates a short-lived **MFA temp token** (JWT, 5 min expiry) signed with a dedicated `JWT_MFA_SECRET`
    - Returns `{ mfaRequired: true, tempToken, user }` — the user is **NOT** logged in yet
 
 **Bank Admin Registration** (`POST /api/v1/auth/bank/register`):
@@ -76,7 +76,7 @@ A separate **`role_permissions`** junction table and **`permissions`** table ena
    - Finds user by email (including `password_hash`)
    - Checks `is_active` flag — throws `403 Forbidden` if deactivated
    - Verifies password with `argon2.verify()`
-   - Generates OTP → stores in DB → generates MFA temp token
+   - Generates OTP → hashes it → stores hash in DB → generates MFA temp token
    - Returns `{ mfaRequired: true, tempToken }` — **no session yet**
 
 **Bank Admin Login** (`POST /api/v1/auth/bank/login`): Same pattern.
@@ -91,9 +91,10 @@ A separate **`role_permissions`** junction table and **`permissions`** table ena
 This is the critical step where the session is actually created. See [auth.service.js#L110-L158](file:///e:/Desktop/Web%20Development/CapitalScale/backend/src/services/auth.service.js#L110-L158):
 
 1. Verifies the MFA temp token (JWT)
-2. Looks up the OTP record from `otp_codes` table by `user_id` + `contact`
-3. **Expiry check**: if OTP has expired, deletes it and throws error
-4. **Code check**: if wrong code, increments `attempts` counter
+2. **Distributed Lock**: Acquires a Redis lock (`acquireOtpLock`) to prevent concurrent brute-force race conditions.
+3. Looks up the OTP record from `otps` table by `user_id` + `contact`
+4. **Expiry check**: if OTP has expired, deletes it and throws error
+5. **Code check**: Hashes the input code and compares it to the stored hash using constant-time `timingSafeEqual()`. If wrong, increments `attempts` counter.
    - If `attempts >= 3`, deletes the OTP entirely → user must re-login
 5. On success:
    - Deletes the OTP
@@ -115,9 +116,9 @@ Defined in [token.utils.js](file:///e:/Desktop/Web%20Development/CapitalScale/ba
 
 | Token Type | Secret | Expiry | Purpose |
 |---|---|---|---|
-| **Access Token** | `JWT_SECRET` (min 32 chars) | `JWT_EXPIRES_IN` (default `7d`) | API request authentication via `Authorization: Bearer <token>` |
-| **Refresh Token** | `JWT_REFRESH_SECRET` (separate key) | `JWT_REFRESH_EXPIRES_IN` (default `30d`) | Stored in HttpOnly cookie, used to rotate access tokens |
-| **MFA Temp Token** | `JWT_SECRET` | `5m` (hardcoded) | Short-lived, bridges login → OTP verification |
+| **Access Token** | `JWT_SECRET` (min 32 chars) | `JWT_EXPIRES_IN` (default `2h`) | API request authentication via `Authorization: Bearer <token>`. Audience: `capitalscale:access` |
+| **Refresh Token** | `JWT_REFRESH_SECRET` (separate key) | `JWT_REFRESH_EXPIRES_IN` (default `30d`) | Stored in HttpOnly cookie, used to rotate access tokens. Audience: `capitalscale:refresh` |
+| **MFA Temp Token** | `JWT_MFA_SECRET` (separate key) | `5m` (hardcoded) | Short-lived, bridges login → OTP verification. Audience: `capitalscale:mfa` |
 
 **Access Token Payload** (via [buildTokenPayload](file:///e:/Desktop/Web%20Development/CapitalScale/backend/src/utils/token.utils.js#L78-L86)):
 ```js
@@ -170,7 +171,7 @@ All session logic lives in [redis.js](file:///e:/Desktop/Web%20Development/Capit
 ```
 
 > [!NOTE]
-> If Redis is unavailable (connection fails), all session functions gracefully degrade — `getSession` returns `null`, `setSession`/`deleteSession` become no-ops. This means the app won't crash but auth will effectively be disabled.
+> If Redis is unavailable (connection fails), all session functions gracefully degrade — `getSession` returns `null`, `setSession`/`deleteSession` become no-ops. Importantly, `isTokenBlacklisted` returns `true` (fail-safe deny) to prevent attackers from exploiting an outage to replay revoked tokens. This means the app won't crash but auth will effectively be disabled for security.
 
 ---
 
@@ -483,7 +484,9 @@ sequenceDiagram
 
 A thorough search across all backend (`/backend`), frontend (`/frontend`), and AI microservice configurations confirms that **`Socket.IO` and native WebSockets are NOT used in this project**. 
 
-Instead, CapitalScale uses a combination of **Asynchronous Job Delegation**, **Client-side HTTP Short Polling**, **Backend-to-Backend Sync Polling**, and **HTTP Webhook Callbacks** to handle long-running operations like document OCR processing, AI parameter extraction, vector embedding, and credit underwriting assessments.
+Instead, CapitalScale uses a combination of **Server-Sent Events (SSE)** synced via Redis Pub/Sub, **RabbitMQ message brokering**, **Asynchronous Job Delegation**, **Backend-to-Backend Sync Polling**, and **HTTP Webhook Callbacks** to handle long-running operations like document OCR processing, AI parameter extraction, vector embedding, and credit underwriting assessments.
+
+*Note: While HTTP short-polling was historically used, the system has been upgraded to a robust Event-Driven architecture with SSE for real-time dashboard notifications.*
 
 ---
 
@@ -505,14 +508,16 @@ Instead, CapitalScale uses a combination of **Asynchronous Job Delegation**, **C
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Rather than maintaining persistent WebSocket TCP connections, the platform employs **stateless HTTP async patterns**:
+Rather than maintaining persistent WebSocket TCP connections, the platform employs **Server-Sent Events (SSE)** and **stateless HTTP async patterns**:
 
 | Technique | Used In Component | Purpose & Implementation |
 |---|---|---|
-| **Client-Side HTTP Short Polling** | [BankAdminDashboard.jsx](file:///e:/Desktop/Web%20Development/CapitalScale/frontend/src/pages/BankAdminDashboard.jsx), [SMEDashboard.jsx](file:///e:/Desktop/Web%20Development/CapitalScale/frontend/src/pages/SMEDashboard.jsx) | Periodically queries job status until long-running AI tasks finish. |
-| **Backend-to-Backend Sync Polling** | [ocr.service.js](file:///e:/Desktop/Web%20Development/CapitalScale/backend/src/services/ocr.service.js) | Backend awaits status resolution from Python AI microservice during document batch reprocessing. |
-| **Webhook Callbacks (Patch Updates)** | [extraction.controller.js](file:///e:/Desktop/Web%20Development/CapitalScale/backend/src/controllers/extraction.controller.js), [ocr.controller.js](file:///e:/Desktop/Web%20Development/CapitalScale/backend/src/controllers/ocr.controller.js) | Python AI service calls Express endpoints upon task completion to update DB asynchronously. |
-| **Simulated Real-Time Agent Trace UI** | [BankAdminDashboard.jsx](file:///e:/Desktop/Web%20Development/CapitalScale/frontend/src/pages/BankAdminDashboard.jsx) | Progress steps are cycled on a interval timer to provide immediate feedback to underwriters while background polling runs. |
+| **Server-Sent Events (SSE) + Redis Pub/Sub** | `backend/src/notifications/sseManager.js`, `frontend/src/hooks/useNotifications.js` | Unidirectional push notifications from server to client. Uses Redis Pub/Sub so events fire correctly even across multiple horizontally scaled Node.js instances. |
+| **RabbitMQ Background Workers** | `backend/src/notifications/workers/` | Enqueues heavy background tasks like Email rendering and OTP dispatch. Uses priority queues and Dead Letter Queues (DLQ) for resiliency. |
+| **Client-Side HTTP Short Polling** | `BankAdminDashboard.jsx`, `SMEDashboard.jsx` | Periodically queries job status for legacy/background tasks until long-running AI tasks finish. |
+| **Backend-to-Backend Sync Polling** | `ocr.service.js` | Backend awaits status resolution from Python AI microservice during document batch reprocessing. |
+| **Webhook Callbacks (Patch Updates)** | `extraction.controller.js`, `ocr.controller.js` | Python AI service calls Express endpoints upon task completion to update DB asynchronously. |
+| **Simulated Real-Time Agent Trace UI** | `BankAdminDashboard.jsx` | Progress steps are cycled on an interval timer to provide immediate feedback to underwriters while background polling runs. |
 
 ---
 
