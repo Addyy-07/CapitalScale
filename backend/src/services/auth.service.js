@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import {
   findSMEByEmail, findSMEById, createSMEUser, updateSMELastLogin,
   findBankAdminByEmail, findBankAdminById, createBankAdminUser, updateBankAdminLastLogin,
-  findRoleByName, getRolePermissions,
+  findRoleByName,
 } from '../db/queries/users.queries.js';
 import { createOtp, deleteOtpsByUserContact, findOtp, incrementOtpAttempts, deleteOtp } from '../db/queries/otps.queries.js';
 import { recordAuditLog } from '../db/queries/auditLogs.queries.js';
@@ -13,13 +13,15 @@ import {
   buildTokenPayload, sanitizeUser, generateMfaToken, verifyMfaToken,
   hashOtpCode, verifyOtpCode,
 } from '../utils/token.utils.js';
-import ApiError from '../utils/ApiError.js';
+import { ApiError } from '../utils/ApiError.js';
 import logger from '../utils/logger.js';
 import {
   setSession, getSession, deleteSession,
   blacklistToken, isTokenBlacklisted,
   acquireOtpLock, releaseOtpLock,
 } from '../config/redis.js';
+import { publishEvent } from '../notifications/index.js';
+import { NOTIFICATION_EVENTS } from '../notifications/events/notificationEvents.js';
 
 
 
@@ -36,18 +38,14 @@ import {
 const sendMfaOtp = async (userId, email) => {
   const code = Math.floor(100000 + Math.random() * 900000).toString();
   await deleteOtpsByUserContact(userId, email);
-
   // Store the hash — never the plaintext code
   const codeHash = hashOtpCode(code);
   await createOtp({ user_id: userId, contact: email, code: codeHash, expiresInMs: 5 * 60 * 1000 });
 
-  // TODO: Integrate email service here to deliver the OTP to the user's inbox.
-  // In development mode the OTP is printed as a WARNING so devs can test locally.
-  // This warning log MUST NEVER appear in production — set NODE_ENV=production.
-  if (process.env.NODE_ENV !== 'production') {
-    logger.warn(`[DEV ONLY ⚠️] MFA OTP for ${email}: ${code}  ← integrate email service & remove this log`);
-  }
-
+  // Fire-and-forget: publish to OTP queue for async email delivery
+  publishEvent(NOTIFICATION_EVENTS.AUTH_OTP_SEND, {
+    userId, email, code, expiresInMinutes: 5,
+  }).catch((err) => logger.error(`[OTP Publish] Failed: ${err.message}`));
   return code;
 };
 
@@ -57,10 +55,10 @@ export const registerSME = async (data, _ipAddress, _userAgent) => {
   const { full_name, business_name, phone, email, password, address } = data;
 
   const existing = await findSMEByEmail(email);
-  if (existing) throw ApiError.conflict('An account with this email already exists');
+  if (existing) { throw ApiError.conflict('An account with this email already exists'); }
 
   const role = await findRoleByName('sme_applicant');
-  if (!role) throw ApiError.internal('Default role not found. Please run database migration.');
+  if (!role) { throw ApiError.internal('Default role not found. Please run database migration.'); }
 
   const password_hash = await argon2.hash(password);
 
@@ -76,11 +74,11 @@ export const registerSME = async (data, _ipAddress, _userAgent) => {
 
 export const loginSME = async ({ email, password }) => {
   const user = await findSMEByEmail(email, true);
-  if (!user) throw ApiError.unauthorized('Invalid email or password');
-  if (!user.is_active) throw ApiError.forbidden('Your account has been deactivated. Contact support.');
+  if (!user) { throw ApiError.unauthorized('Invalid email or password'); }
+  if (!user.is_active) { throw ApiError.forbidden('Your account has been deactivated. Contact support.'); }
 
   const isMatch = await argon2.verify(user.password_hash, password);
-  if (!isMatch) throw ApiError.unauthorized('Invalid email or password');
+  if (!isMatch) { throw ApiError.unauthorized('Invalid email or password'); }
 
   await sendMfaOtp(user.id, email);
   const tempToken = generateMfaToken({ id: user.id, email, role: 'sme' });
@@ -95,10 +93,10 @@ export const registerBankAdmin = async (data) => {
   const { bank_name, branch_name, branch_address, ifsc_code, admin_name, email, phone, password } = data;
 
   const existing = await findBankAdminByEmail(email);
-  if (existing) throw ApiError.conflict('An account with this email already exists');
+  if (existing) { throw ApiError.conflict('An account with this email already exists'); }
 
   const role = await findRoleByName('bank_underwriter');
-  if (!role) throw ApiError.internal('Default role not found. Please run database migration.');
+  if (!role) { throw ApiError.internal('Default role not found. Please run database migration.'); }
 
   const password_hash = await argon2.hash(password);
 
@@ -114,11 +112,11 @@ export const registerBankAdmin = async (data) => {
 
 export const loginBankAdmin = async ({ email, password }) => {
   const user = await findBankAdminByEmail(email, true);
-  if (!user) throw ApiError.unauthorized('Invalid email or password');
-  if (!user.is_active) throw ApiError.forbidden('Your account has been deactivated. Contact support.');
+  if (!user) { throw ApiError.unauthorized('Invalid email or password'); }
+  if (!user.is_active) { throw ApiError.forbidden('Your account has been deactivated. Contact support.'); }
 
   const isMatch = await argon2.verify(user.password_hash, password);
-  if (!isMatch) throw ApiError.unauthorized('Invalid email or password');
+  if (!isMatch) { throw ApiError.unauthorized('Invalid email or password'); }
 
   await sendMfaOtp(user.id, email);
   const tempToken = generateMfaToken({ id: user.id, email, role: 'bank_admin' });
@@ -130,7 +128,7 @@ export const loginBankAdmin = async ({ email, password }) => {
 
 
 export const verifyMfaOTP = async (tempToken, code, ipAddress, userAgent) => {
-  if (!tempToken || !code) throw ApiError.badRequest('MFA token and verification code are required');
+  if (!tempToken || !code) { throw ApiError.badRequest('MFA token and verification code are required'); }
 
   let decoded;
   try { decoded = verifyMfaToken(tempToken); }
@@ -148,7 +146,7 @@ export const verifyMfaOTP = async (tempToken, code, ipAddress, userAgent) => {
 
   try {
     const otp = await findOtp({ user_id: id, contact: email });
-    if (!otp) throw ApiError.notFound('No verification request found. Please login again.');
+    if (!otp) { throw ApiError.notFound('No verification request found. Please login again.'); }
 
     if (otp.expires_at < new Date()) {
       await deleteOtp(otp.id);
@@ -176,10 +174,10 @@ export const verifyMfaOTP = async (tempToken, code, ipAddress, userAgent) => {
       user = await findBankAdminById(id);
     }
 
-    if (!user || !user.is_active) throw ApiError.unauthorized('User not found or account is inactive');
+    if (!user || !user.is_active) { throw ApiError.unauthorized('User not found or account is inactive'); }
 
-    if (role === 'sme') await updateSMELastLogin(id);
-    else await updateBankAdminLastLogin(id);
+    if (role === 'sme') { await updateSMELastLogin(id); }
+    else { await updateBankAdminLastLogin(id); }
 
     const payload = buildTokenPayload(user, role);
     const jti = uuidv4();
@@ -200,7 +198,7 @@ export const verifyMfaOTP = async (tempToken, code, ipAddress, userAgent) => {
 
 
 export const refreshAccessToken = async (refreshToken, ipAddress, userAgent) => {
-  if (!refreshToken) throw ApiError.unauthorized('Refresh token is required');
+  if (!refreshToken) { throw ApiError.unauthorized('Refresh token is required'); }
 
   let decoded;
   try { decoded = verifyRefreshToken(refreshToken); }
@@ -215,7 +213,7 @@ export const refreshAccessToken = async (refreshToken, ipAddress, userAgent) => 
   }
 
   const session = await getSession(jti);
-  if (!session) throw ApiError.unauthorized('Session has expired. Please log in again.');
+  if (!session) { throw ApiError.unauthorized('Session has expired. Please log in again.'); }
 
   await blacklistToken(jti);
   await deleteSession(jti);
@@ -223,7 +221,7 @@ export const refreshAccessToken = async (refreshToken, ipAddress, userAgent) => 
   let user = await findSMEById(id);
   let type = 'sme';
   if (!user) { user = await findBankAdminById(id); type = 'bank_admin'; }
-  if (!user || !user.is_active) throw ApiError.unauthorized('User not found or account is inactive');
+  if (!user || !user.is_active) { throw ApiError.unauthorized('User not found or account is inactive'); }
 
   const newJti         = uuidv4();
   const newRefreshToken = generateRefreshToken({ id: user.id }, newJti);
