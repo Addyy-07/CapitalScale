@@ -233,8 +233,11 @@ export const deletePolicy = asyncHandler(async (req, res) => {
     throw new ApiError(403, 'System default policies cannot be deleted');
   }
 
-  
-  if (policy.bank_name !== req.user.bank_name) {
+  // BUG-08 FIX: Always fetch the admin's bank_name fresh from DB for authorization.
+  // JWT payloads can be stale if the admin's bank association changed after token issuance.
+  // Trusting req.user.bank_name (from JWT) for this check is unsafe.
+  const admin = await findBankAdminById(req.user.id);
+  if (!admin || !admin.bank_name || policy.bank_name !== admin.bank_name) {
     throw new ApiError(403, 'Access denied. You cannot delete policies uploaded by another bank');
   }
 
@@ -289,9 +292,13 @@ export const updatePolicy = asyncHandler(async (req, res) => {
     throw new ApiError(404, 'Policy document not found');
   }
 
-  
-  if (!policy.is_system_default && policy.bank_name !== req.user.bank_name) {
-    throw new ApiError(403, 'Access denied. You cannot edit policies uploaded by another bank');
+  // BUG-08 FIX: Always fetch the admin's bank_name fresh from DB for authorization.
+  // Trusting req.user.bank_name (from JWT) for this check is unsafe — it may be stale.
+  if (!policy.is_system_default) {
+    const admin = await findBankAdminById(req.user.id);
+    if (!admin || !admin.bank_name || policy.bank_name !== admin.bank_name) {
+      throw new ApiError(403, 'Access denied. You cannot edit policies uploaded by another bank');
+    }
   }
 
   const updates = {};

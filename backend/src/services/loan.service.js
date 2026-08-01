@@ -143,7 +143,10 @@ const LoanService = {
 
   async saveDraft(smeId, loanId, data) {
     const loan = await findLoanById(loanId);
-    if (!loan || loan.sme_id?.id !== smeId && loan.sme_id !== smeId) throw ApiError.notFound('Draft loan application not found');
+    // BUG-09 FIX: Added explicit parentheses to clarify operator precedence.
+    // Without them, JavaScript parses this as: (!loan) || ((a !== b) && (c !== d))
+    // which happens to be correct, but is error-prone and unreadable.
+    if (!loan || (loan.sme_id?.id !== smeId && loan.sme_id !== smeId)) throw ApiError.notFound('Draft loan application not found');
     if (loan.status !== 'draft') throw ApiError.badRequest('Cannot edit details once application is submitted');
 
     if (data.current_step !== undefined) {
@@ -355,6 +358,10 @@ const LoanService = {
 
     await updateLoanDraft(loanId, { status: toStatus, progress: STATUS_PROGRESS[toStatus] || loan.progress });
 
+    // EC-04 / IDOR FIX: For bank_admin users, verify the admin belongs to the
+    // same bank as the loan. Without this check, any bank_admin could change
+    // the status of another bank's loan application (cross-bank IDOR).
+    // The admin record is always fetched from DB, never trusted from the JWT.
     let authorName = 'System Administrator';
     let authorModel = 'BankAdminUser';
     if (userContext.role === 'sme') {
@@ -364,6 +371,15 @@ const LoanService = {
     } else {
       const admin = await findBankAdminById(userContext.id);
       authorName = admin?.admin_name || 'Bank Officer';
+
+      // Bank ownership check — only for bank_admin role (super_admin can act on any loan)
+      if (userContext.role === 'bank_admin') {
+        if (!admin || admin.bank_name !== loan.bank_name) {
+          throw ApiError.forbidden(
+            'You are not authorized to update the status of loans belonging to another bank'
+          );
+        }
+      }
     }
 
     await createStatusHistory({
