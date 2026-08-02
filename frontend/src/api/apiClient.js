@@ -6,7 +6,7 @@ import { useAuthStore } from '@/store/authStore.js';
 
 
 const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api/v1',
+  baseURL: import.meta.env.VITE_API_BASE_URL || 'https://capitalscale-backend.onrender.com/',
   timeout: 600000, 
   withCredentials: true, 
   headers: { 'Content-Type': 'application/json' },
