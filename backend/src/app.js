@@ -38,6 +38,7 @@ export const createApp = () => {
   app.use(cookieParser());
 
 
+  app.set("trust proxy", true);
   app.use(requestLogger);
 
 
