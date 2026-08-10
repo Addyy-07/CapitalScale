@@ -51,12 +51,23 @@ async def lifespan(app: FastAPI):
     logger.info(f"🚀  Starting {settings.APP_NAME} v{settings.APP_VERSION}")
     logger.info("=" * 60)
 
-    
+    # ── PostgreSQL ─────────────────────────────────────────────────────────────
+    # Non-fatal: if the DB is unreachable (wrong URL, firewall, etc.) the
+    # service starts in degraded mode. DB-dependent endpoints return 503.
+    # Fix: use the Supabase SESSION-MODE pooler URL (port 5432 on
+    # aws-0-XX.pooler.supabase.com) NOT the direct db.XXX.supabase.co URL.
     try:
         await init_db()
+        logger.info("✅  PostgreSQL connected successfully")
     except Exception as e:
-        logger.critical(f"❌  PostgreSQL initialization failed: {e}")
-        raise
+        logger.critical(
+            f"❌  PostgreSQL initialization failed: {e}\n"
+            f"    ➡  FIX: In ai-services-python/.env, replace DATABASE_URL with the\n"
+            f"       Supabase SESSION-MODE pooler URL from:\n"
+            f"       Supabase Dashboard → Project → Database → Connection Pooling\n"
+            f"       Use port 5432, mode=Session, host=aws-0-XX.pooler.supabase.com\n"
+            f"    ➡  Starting in DEGRADED mode — DB endpoints will return 503."
+        )
 
     
     llm_ok = await ping_llm()
